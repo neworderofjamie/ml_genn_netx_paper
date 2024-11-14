@@ -4,5 +4,5 @@ ARGS=`sed "${LINE}q;d" arguments.txt`
 
 if [ -n "${ARGS}" ]; then
     python -u classifier.py --mode train $ARGS
-    python -u classifier.py --mode test $ARGS
+    python -u classifier.py --mode test_genn $ARGS
 fi
