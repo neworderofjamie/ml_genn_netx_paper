@@ -65,10 +65,12 @@ class Shift:
 
 
 class Blend:
-    def __init__(self, p_blend, sensor_size, n_blend=7644):
+    def __init__(self, p_blend, sensor_size, max_time, n_blend=7644):
         self.p_blend = p_blend
-        self.n_blend = n_blend
         self.sensor_size = sensor_size
+        self.max_time = max_time
+        self.n_blend = n_blend
+        
 
     def __call__(self, dataset: list, classes: list) -> list:
         # Start with (shallow) copy of original dataset
@@ -105,13 +107,12 @@ class Blend:
         X2["t"]+= int((mt1-mt2)/2)
 
         # Delete any spikes that are out of bounds in space or time
-        max_t = MAX_TIMESTEPS * DT * 1000.0
         X1 = np.delete(
             X1, np.where((X1["x"] < 0) | (X1["x"] >= self.sensor_size[0])
-                         | (X1["t"] < 0) | (X1["t"] >= max_t)))
+                         | (X1["t"] < 0) | (X1["t"] >= self.max_time)))
         X2 = np.delete(
             X2, np.where((X2["x"] < 0) | (X2["x"] >= self.sensor_size[0]) 
-                         | (X2["t"] < 0) | (X2["t"] >= max_t)))
+                         | (X2["t"] < 0) | (X2["t"] >= self.max_time)))
 
         # Combine random blended subset of spikes
         mask1 = np.random.rand(X1["x"].shape[0]) < self.p_blend
@@ -123,10 +124,10 @@ class Blend:
         X1_X2 = X1_X2[idx]
         return X1_X2
 
-def load_data(train, dt, num=None):
+def load_data(train, dt, num_timesteps, num=None):
     # Get SHD dataset, cropped to maximum timesteps (in us)
     dataset = SHD(save_to="../data", train=train,
-                  transform=CropTime(max=MAX_TIMESTEPS * dt * 1000.0))
+                  transform=CropTime(max=num_timesteps * dt * 1000.0))
 
     # Get raw event data
     raw_data = []
@@ -161,16 +162,16 @@ def build_ml_genn_model(sensor_size, num_classes, num_hidden):
 
 def train_genn(raw_dataset, network, serialiser,
                input, hidden, output, input_hidden,
-               sensor_size, ordering, num_epochs, dt, reg_lambda):
+               sensor_size, ordering, num_epochs, dt, num_timesteps, reg_lambda):
     # Create EventProp compiler
-    compiler = EventPropCompiler(example_timesteps=MAX_TIMESTEPS,
+    compiler = EventPropCompiler(example_timesteps=num_timesteps,
                                  losses="sparse_categorical_crossentropy",
                                  reg_lambda_upper=reg_lambda, reg_lambda_lower=reg_lambda, 
                                  reg_nu_upper=14, max_spikes=1500, 
                                  optimiser=Adam(0.001 / 1000.0), batch_size=BATCH_SIZE)
     # Create augmentation objects
     shift = Shift(40.0, sensor_size)
-    blend = Blend(0.5, sensor_size)
+    blend = Blend(0.5, sensor_size, num_timesteps * dt * 1000.0)
 
     # Build classes list
     num_output = np.prod(output.shape)
@@ -222,7 +223,8 @@ def train_genn(raw_dataset, network, serialiser,
 
 def evaluate_genn(raw_dataset, network, 
                   input, hidden, output, 
-                  sensor_size, ordering, plot, dt):
+                  sensor_size, ordering, plot, 
+                  dt, num_timesteps):
     # Preprocess
     spikes = []
     labels = []
@@ -232,7 +234,7 @@ def evaluate_genn(raw_dataset, network,
                                               histogram_thresh=1))
         labels.append(label)
     
-    compiler = InferenceCompiler(evaluate_timesteps=MAX_TIMESTEPS,
+    compiler = InferenceCompiler(evaluate_timesteps=num_timesteps,
                                  reset_in_syn_between_batches=True,
                                  batch_size=BATCH_SIZE)
     compiled_net = compiler.compile(network)
@@ -259,7 +261,8 @@ def evaluate_genn(raw_dataset, network,
             axes[1, 0].set_ylabel("Output voltage")
 
 def evaluate_lava(raw_dataset, net_x_filename, 
-                  sensor_size, num_classes, plot):
+                  sensor_size, num_classes, plot, 
+                  num_timesteps):
     # Preprocess
     num_input = int(np.prod(sensor_size))
     transform = ToFrame(sensor_size=sensor_size, time_window=1000.0)
@@ -268,17 +271,17 @@ def evaluate_lava(raw_dataset, net_x_filename,
     for events, label in raw_dataset:
         # Transform events to tensor
         tensor = transform(events)
-        assert tensor.shape[-1] < MAX_TIMESTEPS
+        assert tensor.shape[-1] < num_timesteps
 
         # Transpose tensor and pad time to max
         tensors.append(np.pad(np.reshape(np.transpose(tensor), (num_input, -1)),
-                              ((0, 0), (0, MAX_TIMESTEPS - tensor.shape[0]))))
+                              ((0, 0), (0, num_timesteps - tensor.shape[0]))))
         labels.append(label)
 
     # Stack tensors
     tensors = np.hstack(tensors)
 
-    network_lava = netx.hdf5.Network(net_config=net_x_filename, reset_interval=MAX_TIMESTEPS)
+    network_lava = netx.hdf5.Network(net_config=net_x_filename, reset_interval=num_timesteps)
 
     # **TODO** move to recurrent unit test
     assert network_lava.input_shape == (num_input,)
@@ -292,24 +295,24 @@ def evaluate_lava(raw_dataset, net_x_filename,
 
     # Create monitor to record output voltages (shape is total timesteps)
     monitor_output = Monitor()
-    monitor_output.probe(network_lava.layers[-1].neuron.v, NUM_TEST_SAMPLES * MAX_TIMESTEPS)
+    monitor_output.probe(network_lava.layers[-1].neuron.v, NUM_TEST_SAMPLES * num_timesteps)
 
     if plot:
         monitor_hidden = Monitor()
-        monitor_hidden.probe(network_lava.layers[0].neuron.s_out, NUM_TEST_SAMPLES * MAX_TIMESTEPS)
+        monitor_hidden.probe(network_lava.layers[0].neuron.s_out, NUM_TEST_SAMPLES * num_timesteps)
 
     run_config = Loihi2SimCfg(select_tag="fixed_pt")
 
     # Run model for each test sample
     for _ in tqdm(range(NUM_TEST_SAMPLES)):
-        network_lava.run(condition=RunSteps(num_steps=MAX_TIMESTEPS), run_cfg=run_config)
+        network_lava.run(condition=RunSteps(num_steps=num_timesteps), run_cfg=run_config)
 
     # Get output and reshape
     output_v = monitor_output.get_data()["neuron"]["v"]
     output_v = np.reshape(output_v, (NUM_TEST_SAMPLES, MAX_TIMESTEPS, num_classes))
 
     # Calculate output weighting
-    output_weighting = np.exp(-np.arange(MAX_TIMESTEPS) / MAX_TIMESTEPS)
+    output_weighting = np.exp(-np.arange(num_timesteps) / num_timesteps)
 
     # For each example, sum weighted output neuron voltage over time
     sum_v = np.sum(output_v * output_weighting[np.newaxis,:,np.newaxis], axis=1)
@@ -321,7 +324,7 @@ def evaluate_lava(raw_dataset, net_x_filename,
     print(f"Lava test accuracy: {good/NUM_TEST_SAMPLES*100}%")
     if plot:
         hidden_spikes = monitor_hidden.get_data()["neuron"]["s_out"]
-        hidden_spikes = np.reshape(hidden_spikes, (NUM_TEST_SAMPLES, MAX_TIMESTEPS, num_hidden))
+        hidden_spikes = np.reshape(hidden_spikes, (NUM_TEST_SAMPLES, num_timesteps, num_hidden))
         
         fig, axes = plt.subplots(2, NUM_TEST_SAMPLES, sharex="col", sharey="row")
         for a in range(NUM_TEST_SAMPLES):
@@ -340,11 +343,11 @@ parser.add_argument("--mode", choices=["train", "test_genn", "test_lava", "test_
 parser.add_argument("--kernel-profiling", action="store_true", help="Output kernel profiling data")
 parser.add_argument("--plot", action="store_true", help="Plot debug")
 parser.add_argument("--num-epochs", type=int, default=50, help="Number of training epochs")
-parser.add_argument("--num-timesteps", type=int, default=1000, help="Number of timesteps")
-parser.add_argument("--dataset", choices=["ssc", "shd"], required=True)
+#parser.add_argument("--dataset", choices=["ssc", "shd"], required=True)
 parser.add_argument("--num-hidden", type=int, help="Number of hidden neurons")
 parser.add_argument("--reg-lambda", type=float, help="EventProp regularization strength")
 parser.add_argument("--dt", type=float, help="Simulation timestep")
+parser.add_argument("--num-timesteps", type=int, required=True, help="Number of simulation timesteps")
 
 args = parser.parse_args()
 
@@ -357,10 +360,10 @@ unique_suffix = "_".join(("_".join(str(i) for i in val) if isinstance(val, list)
 
 # Get SHD data
 if args.mode == "train":
-    raw_train_data, sensor_size, ordering, num_classes = load_data(True, args.dt)
-    raw_test_data, _, _, _ = load_data(False, args.dt, NUM_TEST_SAMPLES)
+    raw_train_data, sensor_size, ordering, num_classes = load_data(True, args.dt, args.num_timesteps)
+    raw_test_data, _, _, _ = load_data(False, args.dt, args.num_timesteps, NUM_TEST_SAMPLES)
 else:
-    raw_test_data, sensor_size, ordering, num_classes = load_data(False, args.dt, NUM_TEST_SAMPLES)
+    raw_test_data, sensor_size, ordering, num_classes = load_data(False, args.dt, args.num_timesteps, NUM_TEST_SAMPLES)
 
 # Build suitable mlGeNN model
 network, input, hidden, output, input_hidden = build_ml_genn_model(sensor_size, num_classes, args.num_hidden)
@@ -370,7 +373,8 @@ serialiser = Numpy(f"checkpoints_{unique_suffix}")
 if args.mode == "train":
     train_genn(raw_train_data, network, serialiser,
                 input, hidden, output, input_hidden,
-                sensor_size, ordering, args.num_epochs, args.dt, args.reg_lambda)
+                sensor_size, ordering, args.num_epochs, 
+                args.dt, args.num_timesteps, args.reg_lambda)
     
 # Load checkpoints and export to NETX
 network.load((args.num_epochs - 1,), serialiser)
@@ -381,9 +385,11 @@ export(f"shd_{unique_suffix}.net", input, output, dt=args.dt)
 if args.mode == "test_genn":
     evaluate_genn(raw_test_data, network, 
                   input, hidden, output, 
-                  sensor_size, ordering, args.dt, args.plot)
+                  sensor_size, ordering,
+                  args.dt, args.num_timesteps, args.plot)
 elif args.mode == "test_lava" or args.mode == "test_loihi":
-    evaluate_lava(raw_test_data, f"shd_{unique_suffix}.net", sensor_size, num_classes, args.plot)
+    evaluate_lava(raw_test_data, f"shd_{unique_suffix}.net", sensor_size, num_classes, 
+                  args.plot, args.num_timesteps)
 
 if args.plot:
     plt.show()

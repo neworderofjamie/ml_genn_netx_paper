@@ -1,0 +1,6 @@
+--num-epochs 50 --num-hidden 256 --reg-lambda 5e-10 --dt 2 --num-timesteps 500
+--num-epochs 50 --num-hidden 256 --reg-lambda 2.5e-10 --dt 1 --num-timesteps 1000
+--num-epochs 50 --num-hidden 512 --reg-lambda 5e-11 --dt 2 --num-timesteps 500
+--num-epochs 50 --num-hidden 512 --reg-lambda 5e-10 --dt 1 --num-timesteps 1000
+--num-epochs 50 --num-hidden 1024 --reg-lambda 5e-11 --dt 2 --num-timesteps 500
+--num-epochs 50 --num-hidden 1024 --reg-lambda 5e-11 --dt 1 --num-timesteps 1000
