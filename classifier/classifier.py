@@ -54,8 +54,7 @@ class CSVTrainLog(Callback):
         self.csv_writer = csv.writer(self.file, delimiter=",")
 
         # Write header row if we're not resuming from an existing training run
-        if not resume:
-            self.csv_writer.writerow(["Epoch", "Num trials", "Number correct", "Time"])
+        self.csv_writer.writerow(["Epoch", "Num trials", "Number correct", "Time"])
 
         self.output_pop = output_pop
 
