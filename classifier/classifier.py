@@ -46,6 +46,28 @@ class EaseInSchedule(Callback):
                 o.alpha = 0.001
 
 
+class CSVTrainLog(Callback):
+    def __init__(self, filename, output_pop, resume):
+        # Create CSV writer
+        self.file = open(filename, "a" if resume else "w")
+        self.csv_writer = csv.writer(self.file, delimiter=",")
+
+        # Write header row if we're not resuming from an existing training run
+        if not resume:
+            self.csv_writer.writerow(["Epoch", "Num trials", "Number correct", "Time"])
+
+        self.output_pop = output_pop
+
+    def on_epoch_begin(self, epoch):
+        self.start_time = perf_counter()
+
+    def on_epoch_end(self, epoch, metrics):
+        m = metrics[self.output_pop]
+        self.csv_writer.writerow([epoch, m.total, m.correct, 
+                                  perf_counter() - self.start_time])
+        self.file.flush()
+
+
 class Shift:
     def __init__(self, f_shift, sensor_size):
         self.f_shift = f_shift
@@ -126,7 +148,7 @@ class Blend:
 
 def load_data(train, dt, num_timesteps, num=None):
     # Get SHD dataset, cropped to maximum timesteps (in us)
-    dataset = SHD(save_to="../data", train=train,
+    dataset = SHD(save_to="./data", train=train,
                   transform=CropTime(max=num_timesteps * dt * 1000.0))
 
     # Get raw event data
@@ -160,7 +182,7 @@ def build_ml_genn_model(sensor_size, num_classes, num_hidden):
 
     return network, input, hidden, output, input_hidden
 
-def train_genn(raw_dataset, network, serialiser,
+def train_genn(raw_dataset, network, serialiser, unique_suffix,
                input, hidden, output, input_hidden,
                sensor_size, ordering, num_epochs, dt, num_timesteps, reg_lambda):
     # Create EventProp compiler
@@ -180,13 +202,14 @@ def train_genn(raw_dataset, network, serialiser,
         classes[label].append(i)
     
     # Compile network
-    compiled_net = compiler.compile(network)
+    compiled_net = compiler.compile(network, name=f"classifier_train_{unique_suffix}")
     input_hidden_sg = compiled_net.connection_populations[input_hidden]
     
     # Train
     num_hidden = np.prod(hidden.shape)
     with compiled_net:
         callbacks = [Checkpoint(serialiser), EaseInSchedule(),
+                     CSVTrainLog(f"train_output_{unique_suffix}.csv", output),
                      SpikeRecorder(hidden, key="hidden_spikes",
                                    record_counts=True)]
         # Loop through epochs
@@ -221,7 +244,7 @@ def train_genn(raw_dataset, network, serialiser,
                 g_view[:,hidden_spikes==0] += 0.002
                 input_hidden_sg.vars["g"].push_to_device()
 
-def evaluate_genn(raw_dataset, network, 
+def evaluate_genn(raw_dataset, network, unique_suffix,
                   input, hidden, output, 
                   sensor_size, ordering, plot, 
                   dt, num_timesteps):
@@ -237,7 +260,7 @@ def evaluate_genn(raw_dataset, network,
     compiler = InferenceCompiler(evaluate_timesteps=num_timesteps,
                                  reset_in_syn_between_batches=True,
                                  batch_size=BATCH_SIZE)
-    compiled_net = compiler.compile(network)
+    compiled_net = compiler.compile(network, name=f"classifier_test_{unique_suffix}")
 
     with compiled_net:
         callbacks = ["batch_progress_bar"]
@@ -371,7 +394,7 @@ network, input, hidden, output, input_hidden = build_ml_genn_model(sensor_size, 
 serialiser = Numpy(f"checkpoints_{unique_suffix}")
 
 if args.mode == "train":
-    train_genn(raw_train_data, network, serialiser,
+    train_genn(raw_train_data, network, serialiser, unique_suffix,
                 input, hidden, output, input_hidden,
                 sensor_size, ordering, args.num_epochs, 
                 args.dt, args.num_timesteps, args.reg_lambda)
@@ -383,7 +406,7 @@ export(f"shd_{unique_suffix}.net", input, output, dt=args.dt)
 
 
 if args.mode == "test_genn":
-    evaluate_genn(raw_test_data, network, 
+    evaluate_genn(raw_test_data, network, unique_suffix,
                   input, hidden, output, 
                   sensor_size, ordering,
                   args.dt, args.num_timesteps, args.plot)
