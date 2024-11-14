@@ -47,9 +47,9 @@ class EaseInSchedule(Callback):
 
 
 class CSVTrainLog(Callback):
-    def __init__(self, filename, output_pop, resume):
+    def __init__(self, filename, output_pop):
         # Create CSV writer
-        self.file = open(filename, "a" if resume else "w")
+        self.file = open(filename, "w")
         self.csv_writer = csv.writer(self.file, delimiter=",")
 
         # Write header row if we're not resuming from an existing training run
