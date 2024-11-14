@@ -26,6 +26,7 @@ from json import dump
 from ml_genn.utils.data import preprocess_tonic_spikes
 from ml_genn_netx import export
 from random import choice
+from time import perf_counter
 from tqdm import tqdm
 
 from ml_genn.compilers.event_prop_compiler import default_params
