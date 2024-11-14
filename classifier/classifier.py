@@ -1,14 +1,9 @@
 import csv
 import numpy as np
 import matplotlib.pyplot as plt
-import lava.lib.dl.netx as netx
 import logging
 
 from argparse import ArgumentParser
-from lava.magma.core.run_configs import Loihi2SimCfg
-from lava.magma.core.run_conditions import RunSteps
-from lava.proc.io.source import RingBuffer as SourceRingBuffer
-from lava.proc.monitor.process import Monitor
 from ml_genn import Connection, Network, Population
 from ml_genn.callbacks import Callback, Checkpoint, SpikeRecorder, VarRecorder
 from ml_genn.compilers import EventPropCompiler, InferenceCompiler
@@ -287,6 +282,13 @@ def evaluate_genn(raw_dataset, network, unique_suffix,
 def evaluate_lava(raw_dataset, net_x_filename, 
                   sensor_size, num_classes, plot, 
                   dt, num_timesteps):
+    import lava.lib.dl.netx as netx
+                      
+    from lava.magma.core.run_configs import Loihi2SimCfg
+    from lava.magma.core.run_conditions import RunSteps
+    from lava.proc.io.source import RingBuffer as SourceRingBuffer
+    from lava.proc.monitor.process import Monitor
+
     # Preprocess
     num_input = int(np.prod(sensor_size))
     transform = ToFrame(sensor_size=sensor_size, time_window=(1000.0 * dt), include_incomplete=True)
