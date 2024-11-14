@@ -409,8 +409,8 @@ export(f"shd_{unique_suffix}.net", input, output, dt=args.dt)
 if args.mode == "test_genn":
     evaluate_genn(raw_test_data, network, unique_suffix,
                   input, hidden, output, 
-                  sensor_size, ordering,
-                  args.dt, args.num_timesteps, args.plot)
+                  sensor_size, ordering, args.plot,
+                  args.dt, args.num_timesteps)
 elif args.mode == "test_lava" or args.mode == "test_loihi":
     evaluate_lava(raw_test_data, f"shd_{unique_suffix}.net", sensor_size, num_classes, 
                   args.plot, args.num_timesteps)
