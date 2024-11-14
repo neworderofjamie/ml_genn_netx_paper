@@ -286,10 +286,10 @@ def evaluate_genn(raw_dataset, network, unique_suffix,
 
 def evaluate_lava(raw_dataset, net_x_filename, 
                   sensor_size, num_classes, plot, 
-                  num_timesteps):
+                  dt, num_timesteps):
     # Preprocess
     num_input = int(np.prod(sensor_size))
-    transform = ToFrame(sensor_size=sensor_size, time_window=1000.0)
+    transform = ToFrame(sensor_size=sensor_size, time_window=(1000.0 * dt), include_incomplete=True)
     tensors = []
     labels = []
     for events, label in raw_dataset:
@@ -413,7 +413,7 @@ if args.mode == "test_genn":
                   args.dt, args.num_timesteps)
 elif args.mode == "test_lava" or args.mode == "test_loihi":
     evaluate_lava(raw_test_data, f"shd_{unique_suffix}.net", sensor_size, num_classes, 
-                  args.plot, args.num_timesteps)
+                  args.plot, args.dt, args.num_timesteps)
 
 if args.plot:
     plt.show()
