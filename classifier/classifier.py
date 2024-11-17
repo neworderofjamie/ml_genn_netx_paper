@@ -333,7 +333,7 @@ def evaluate_lava(raw_dataset, net_x_filename,
 
     # Get output and reshape
     output_v = monitor_output.get_data()["neuron"]["v"]
-    output_v = np.reshape(output_v, (num_test_samples, MAX_TIMESTEPS, num_classes))
+]    output_v = np.reshape(output_v, (num_test_samples, num_timesteps, num_classes))
 
     # Calculate output weighting
     output_weighting = np.exp(-np.arange(num_timesteps) / num_timesteps)
