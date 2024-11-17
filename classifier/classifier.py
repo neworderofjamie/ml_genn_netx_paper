@@ -27,8 +27,6 @@ from tqdm import tqdm
 from ml_genn.compilers.event_prop_compiler import default_params
 
 BATCH_SIZE = 32
-NUM_TEST_SAMPLES = 200
-
 
 class EaseInSchedule(Callback):
     def set_params(self, compiled_network, **kwargs):
@@ -243,7 +241,7 @@ def train_genn(raw_dataset, network, serialiser, unique_suffix,
 def evaluate_genn(raw_dataset, network, unique_suffix,
                   input, hidden, output, 
                   sensor_size, ordering, plot, 
-                  dt, num_timesteps):
+                  dt, num_timesteps, num_test_samples):
     # Preprocess
     spikes = []
     labels = []
@@ -271,8 +269,8 @@ def evaluate_genn(raw_dataset, network, unique_suffix,
         print(f"GeNN test accuracy: {100 * metrics[output].result}%")
         
         if plot:
-            fig, axes = plt.subplots(2, NUM_TEST_SAMPLES, sharex="col", sharey="row")
-            for a in range(NUM_TEST_SAMPLES):
+            fig, axes = plt.subplots(2, , sharex="col", sharey="row")
+            for a in range(num_test_samples):
                 axes[0, a].scatter(cb_data["hidden_spikes"][0][a], cb_data["hidden_spikes"][1][a], s=1)
                 axes[1, a].plot(cb_data["output_v"][a])
             
@@ -281,7 +279,7 @@ def evaluate_genn(raw_dataset, network, unique_suffix,
 
 def evaluate_lava(raw_dataset, net_x_filename, 
                   sensor_size, num_classes, plot, 
-                  dt, num_timesteps):
+                  dt, num_timesteps, num_test_samples):
     import lava.lib.dl.netx as netx
                       
     from lava.magma.core.run_configs import Loihi2SimCfg
@@ -321,21 +319,21 @@ def evaluate_lava(raw_dataset, net_x_filename,
 
     # Create monitor to record output voltages (shape is total timesteps)
     monitor_output = Monitor()
-    monitor_output.probe(network_lava.layers[-1].neuron.v, NUM_TEST_SAMPLES * num_timesteps)
+    monitor_output.probe(network_lava.layers[-1].neuron.v, num_test_samples * num_timesteps)
 
     if plot:
         monitor_hidden = Monitor()
-        monitor_hidden.probe(network_lava.layers[0].neuron.s_out, NUM_TEST_SAMPLES * num_timesteps)
+        monitor_hidden.probe(network_lava.layers[0].neuron.s_out, num_test_samples * num_timesteps)
 
     run_config = Loihi2SimCfg(select_tag="fixed_pt")
 
     # Run model for each test sample
-    for _ in tqdm(range(NUM_TEST_SAMPLES)):
+    for _ in tqdm(range(num_test_samples)):
         network_lava.run(condition=RunSteps(num_steps=num_timesteps), run_cfg=run_config)
 
     # Get output and reshape
     output_v = monitor_output.get_data()["neuron"]["v"]
-    output_v = np.reshape(output_v, (NUM_TEST_SAMPLES, MAX_TIMESTEPS, num_classes))
+    output_v = np.reshape(output_v, (num_test_samples, MAX_TIMESTEPS, num_classes))
 
     # Calculate output weighting
     output_weighting = np.exp(-np.arange(num_timesteps) / num_timesteps)
@@ -347,13 +345,13 @@ def evaluate_lava(raw_dataset, net_x_filename,
     pred = np.argmax(sum_v, axis=1)
     good = np.sum(pred == labels)
 
-    print(f"Lava test accuracy: {good/NUM_TEST_SAMPLES*100}%")
+    print(f"Lava test accuracy: {good/num_test_samples*100}%")
     if plot:
         hidden_spikes = monitor_hidden.get_data()["neuron"]["s_out"]
-        hidden_spikes = np.reshape(hidden_spikes, (NUM_TEST_SAMPLES, num_timesteps, num_hidden))
+        hidden_spikes = np.reshape(hidden_spikes, (num_test_samples, num_timesteps, num_hidden))
         
-        fig, axes = plt.subplots(2, NUM_TEST_SAMPLES, sharex="col", sharey="row")
-        for a in range(NUM_TEST_SAMPLES):
+        fig, axes = plt.subplots(2, num_test_samples, sharex="col", sharey="row")
+        for a in range(num_test_samples):
             sample_hidden_spikes = np.where(hidden_spikes[a,:,:] > 0.0)
             axes[0, a].scatter(sample_hidden_spikes[0], sample_hidden_spikes[1], s=1)
             axes[1, a].plot(output_v[a,:,:])
@@ -368,8 +366,8 @@ parser = ArgumentParser()
 parser.add_argument("--mode", choices=["train", "test_genn", "test_lava", "test_loihi"], default="train")
 parser.add_argument("--kernel-profiling", action="store_true", help="Output kernel profiling data")
 parser.add_argument("--plot", action="store_true", help="Plot debug")
-parser.add_argument("--num-epochs", type=int, default=50, help="Number of training epochs")
-#parser.add_argument("--dataset", choices=["ssc", "shd"], required=True)
+parser.add_argument("--num-epochs", type=int, default=50, help="Number of training epochs")#parser.add_argument("--dataset", choices=["ssc", "shd"], required=True)
+parser.add_argument("--num-test-samples", type=int, help="Number of testing samples to use")
 parser.add_argument("--num-hidden", type=int, help="Number of hidden neurons")
 parser.add_argument("--reg-lambda", type=float, help="EventProp regularization strength")
 parser.add_argument("--dt", type=float, help="Simulation timestep")
@@ -387,9 +385,9 @@ unique_suffix = "_".join(("_".join(str(i) for i in val) if isinstance(val, list)
 # Get SHD data
 if args.mode == "train":
     raw_train_data, sensor_size, ordering, num_classes = load_data(True, args.dt, args.num_timesteps)
-    raw_test_data, _, _, _ = load_data(False, args.dt, args.num_timesteps, NUM_TEST_SAMPLES)
+    raw_test_data, _, _, _ = load_data(False, args.dt, args.num_timesteps, args.num_test_samples)
 else:
-    raw_test_data, sensor_size, ordering, num_classes = load_data(False, args.dt, args.num_timesteps, NUM_TEST_SAMPLES)
+    raw_test_data, sensor_size, ordering, num_classes = load_data(False, args.dt, args.num_timesteps, args.num_test_samples)
 
 # Build suitable mlGeNN model
 network, input, hidden, output, input_hidden = build_ml_genn_model(sensor_size, num_classes, args.num_hidden)
@@ -408,14 +406,16 @@ network.load((args.num_epochs - 1,), serialiser)
 export(f"shd_{unique_suffix}.net", input, output, dt=args.dt)
 
 
+num_test_samples = (len(num_test_samples) if args.num_test_samples is None
+                    else args.num_test_samples)
 if args.mode == "test_genn":
     evaluate_genn(raw_test_data, network, unique_suffix,
                   input, hidden, output, 
                   sensor_size, ordering, args.plot,
-                  args.dt, args.num_timesteps)
+                  args.dt, args.num_timesteps, num_test_samples)
 elif args.mode == "test_lava" or args.mode == "test_loihi":
     evaluate_lava(raw_test_data, f"shd_{unique_suffix}.net", sensor_size, num_classes, 
-                  args.plot, args.dt, args.num_timesteps)
+                  args.plot, args.dt, args.num_timesteps, num_test_samples)
 
 if args.plot:
     plt.show()
