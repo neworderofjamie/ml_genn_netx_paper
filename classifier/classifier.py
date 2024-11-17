@@ -278,14 +278,17 @@ def evaluate_genn(raw_dataset, network, unique_suffix,
             axes[1, 0].set_ylabel("Output voltage")
 
 def evaluate_lava(raw_dataset, net_x_filename, 
-                  sensor_size, num_classes, plot, 
+                  sensor_size, num_classes, mode, plot,
                   dt, num_timesteps, num_test_samples):
     import lava.lib.dl.netx as netx
                       
-    from lava.magma.core.run_configs import Loihi2SimCfg
+    from lava.magma.core.run_configs import Loihi2SimCfg, Loihi2HwCfg
     from lava.magma.core.run_conditions import RunSteps
+    from lava.proc.cyclic_buffer.process import CyclicBuffer
     from lava.proc.io.source import RingBuffer as SourceRingBuffer
     from lava.proc.monitor.process import Monitor
+    from lava.utils.loihi2_state_probes import StateProbe
+    from lava.utils.system import Loihi2
 
     # Preprocess
     num_input = int(np.prod(sensor_size))
@@ -295,7 +298,7 @@ def evaluate_lava(raw_dataset, net_x_filename,
     for events, label in raw_dataset:
         # Transform events to tensor
         tensor = transform(events)
-        assert tensor.shape[-1] < num_timesteps
+        assert tensor.shape[0] < num_timesteps
 
         # Transpose tensor and pad time to max
         tensors.append(np.pad(np.reshape(np.transpose(tensor), (num_input, -1)),
@@ -303,36 +306,60 @@ def evaluate_lava(raw_dataset, net_x_filename,
         labels.append(label)
 
     # Stack tensors
-    tensors = np.hstack(tensors)
+    tensors = np.hstack(tensors).astype(np.int8)
 
-    network_lava = netx.hdf5.Network(net_config=net_x_filename, reset_interval=num_timesteps)
+    # Create network from NetX file
+    network_lava = netx.hdf5.Network(net_config=net_x_filename, 
+                                     reset_interval=num_timesteps,
+                                     input_message_bits=8)
 
-    # **TODO** move to recurrent unit test
-    assert network_lava.input_shape == (num_input,)
-    assert len(network_lava) == 2
-    assert type(network_lava.layers[0]) == netx.blocks.process.RecurrentDense
-    assert type(network_lava.layers[1]) == netx.blocks.process.Dense
+    # If we're evaluating using Lava
+    if mode == "evaluate_lava":
+        # Create source ring buffer to deliver input spike tensors and connect to network input port
+        input_lava = SourceRingBuffer(data=tensors)
+        input_lava.s_out.connect(network_lava.inp)
 
-    # Create source ring buffer to deliver input spike tensors and connect to network input port
-    input_lava = SourceRingBuffer(data=tensors)
-    input_lava.s_out.connect(network_lava.inp)
+        # Create monitor to record output voltages (shape is total timesteps)
+        monitor_output = Monitor()
+        monitor_output.probe(network_lava.layers[-1].neuron.v, num_test_samples * num_timesteps)
 
-    # Create monitor to record output voltages (shape is total timesteps)
-    monitor_output = Monitor()
-    monitor_output.probe(network_lava.layers[-1].neuron.v, num_test_samples * num_timesteps)
+        if plot:
+            monitor_hidden = Monitor()
+            monitor_hidden.probe(network_lava.layers[0].neuron.s_out, num_test_samples * num_timesteps)
 
-    if plot:
-        monitor_hidden = Monitor()
-        monitor_hidden.probe(network_lava.layers[0].neuron.s_out, num_test_samples * num_timesteps)
+        run_config = Loihi2SimCfg(select_tag="fixed_pt")
+        
+        # Run model for each test sample
+        for _ in tqdm(range(num_test_samples)):
+            network_lava.run(condition=RunSteps(num_steps=num_timesteps), run_cfg=run_config)
 
-    run_config = Loihi2SimCfg(select_tag="fixed_pt")
+        output_v = monitor_output.get_data()["neuron"]["v"]
+    # Otherwise, if we're evaluating on device
+    else:
+        if Loihi2.is_loihi2_available:
+            print(f'Running on {Loihi2.partition}')
+        else:
+            raise RuntimeError("Loihi2 compiler not available")
 
-    # Run model for each test sample
-    for _ in tqdm(range(num_test_samples)):
-        network_lava.run(condition=RunSteps(num_steps=num_timesteps), run_cfg=run_config)
+        # Create cyclic buffer and connect to network input
+        first_tensor = tensors[:,0]
+        other_tensors = tensors[:,1:]
+        input_lava = CyclicBuffer(first_frame=first_tensor,
+                                  replay_frames=other_tensors)
+        input_lava.s_out.connect(network_lava.inp)
+        
+        # Create state probe to record output voltages
+        probe_output_v = StateProbe(network_lava.layers[-1].neuron.v)
 
-    # Get output and reshape
-    output_v = monitor_output.get_data()["neuron"]["v"]
+        run_config = Loihi2HwCfg(callback_fxs=[probe_output_v])
+        
+        # Run model for each test sample
+        for _ in tqdm(range(num_test_samples)):
+            network_lava.run(condition=RunSteps(num_steps=num_timesteps), run_cfg=run_config)
+
+        output_v = probe_output_v.time_series.reshape(num_classes, num_timesteps * num_test_samples).T
+
+    # Reshape output
     output_v = np.reshape(output_v, (num_test_samples, num_timesteps, num_classes))
 
     # Calculate output weighting
@@ -380,7 +407,6 @@ unique_suffix = "_".join(("_".join(str(i) for i in val) if isinstance(val, list)
                          else str(val))
                          for arg, val in vars(args).items()
                          if arg not in ["mode", "kernel_profiling", "num_test_samples"])
-                         
 
 # Get SHD data
 if args.mode == "train":
@@ -415,7 +441,7 @@ if args.mode == "test_genn":
                   args.dt, args.num_timesteps, num_test_samples)
 elif args.mode == "test_lava" or args.mode == "test_loihi":
     evaluate_lava(raw_test_data, f"shd_{unique_suffix}.net", sensor_size, num_classes, 
-                  args.plot, args.dt, args.num_timesteps, num_test_samples)
+                  args.mode, args.plot, args.dt, args.num_timesteps, num_test_samples)
 
 if args.plot:
     plt.show()
