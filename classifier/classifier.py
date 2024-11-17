@@ -379,7 +379,7 @@ args = parser.parse_args()
 unique_suffix = "_".join(("_".join(str(i) for i in val) if isinstance(val, list) 
                          else str(val))
                          for arg, val in vars(args).items()
-                         if arg not in ["mode", "kernel_profiling"])
+                         if arg not in ["mode", "kernel_profiling", "num_test_samples"])
                          
 
 # Get SHD data
