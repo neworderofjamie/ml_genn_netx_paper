@@ -406,7 +406,7 @@ network.load((args.num_epochs - 1,), serialiser)
 export(f"shd_{unique_suffix}.net", input, output, dt=args.dt)
 
 
-num_test_samples = (len(num_test_samples) if args.num_test_samples is None
+num_test_samples = (len(raw_test_data) if args.num_test_samples is None
                     else args.num_test_samples)
 if args.mode == "test_genn":
     evaluate_genn(raw_test_data, network, unique_suffix,
