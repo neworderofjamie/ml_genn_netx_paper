@@ -269,7 +269,7 @@ def evaluate_genn(raw_dataset, network, unique_suffix,
         print(f"GeNN test accuracy: {100 * metrics[output].result}%")
         
         if plot:
-            fig, axes = plt.subplots(2, , sharex="col", sharey="row")
+            fig, axes = plt.subplots(2, num_test_samples, sharex="col", sharey="row")
             for a in range(num_test_samples):
                 axes[0, a].scatter(cb_data["hidden_spikes"][0][a], cb_data["hidden_spikes"][1][a], s=1)
                 axes[1, a].plot(cb_data["output_v"][a])
