@@ -240,7 +240,7 @@ def train_genn(raw_dataset, network, serialiser, unique_suffix,
 
 def evaluate_genn(raw_dataset, network, unique_suffix,
                   input, hidden, output, 
-                  sensor_size, ordering, plot, 
+                  sensor_size, ordering, plot, kernel_profiling,
                   dt, num_timesteps, num_test_samples):
     # Preprocess
     spikes = []
@@ -253,7 +253,7 @@ def evaluate_genn(raw_dataset, network, unique_suffix,
     
     compiler = InferenceCompiler(evaluate_timesteps=num_timesteps,
                                  reset_in_syn_between_batches=True,
-                                 batch_size=BATCH_SIZE)
+                                 batch_size=BATCH_SIZE, kernel_profiling=kernel_profiling)
     compiled_net = compiler.compile(network, name=f"classifier_test_{unique_suffix}")
 
     with compiled_net:
@@ -261,13 +261,20 @@ def evaluate_genn(raw_dataset, network, unique_suffix,
         if plot:
             callbacks.extend([SpikeRecorder(hidden, key="hidden_spikes"),
                               VarRecorder(output, "v", key="output_v")])
-
+        start_time = perf_counter()
         metrics, cb_data  = compiled_net.evaluate({input: spikes},
                                                   {output: labels},
                                                   callbacks=callbacks)
-
-        print(f"GeNN test accuracy: {100 * metrics[output].result}%")
         
+        end_time = perf_counter()
+        print(f"GeNN test accuracy: {100 * metrics[output].result}%")
+        print(f"GeNN test time = {end_time - start_time}s")
+        
+        if kernel_profiling:
+            print(f"Neuron update time = {compiled_net.genn_model.neuron_update_time}")
+            print(f"Presynaptic update time = {compiled_net.genn_model.presynaptic_update_time}")
+            print(f"Reset time = {compiled_net.genn_model.get_custom_update_time('Reset')}")
+
         if plot:
             fig, axes = plt.subplots(2, num_test_samples, sharex="col", sharey="row")
             for a in range(num_test_samples):
@@ -437,7 +444,7 @@ num_test_samples = (len(raw_test_data) if args.num_test_samples is None
 if args.mode == "test_genn":
     evaluate_genn(raw_test_data, network, unique_suffix,
                   input, hidden, output, 
-                  sensor_size, ordering, args.plot,
+                  sensor_size, ordering, args.plot, args.kernel_profiling,
                   args.dt, args.num_timesteps, num_test_samples)
 elif args.mode == "test_lava" or args.mode == "test_loihi":
     evaluate_lava(raw_test_data, f"shd_{unique_suffix}.net", sensor_size, num_classes, 
