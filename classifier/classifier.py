@@ -433,17 +433,18 @@ def evaluate_lava(raw_dataset, net_x_filename, unique_suffix,
         # Stack tensors
         tensors = np.hstack(tensors).astype(np.int8)
 
-        # Create network from NetX file
-        network_lava = netx.hdf5.Network(net_config=net_x_filename, 
-                                        reset_interval=num_timesteps,
-                                        input_message_bits=8)
 
         # If we're evaluating using Lava
         if mode == "test_lava":
             from lava.magma.core.run_configs import Loihi2SimCfg
             from lava.proc.io.source import RingBuffer
             from lava.proc.monitor.process import Monitor
-        
+
+            # Create network from NetX file
+            network_lava = netx.hdf5.Network(net_config=net_x_filename, 
+                                            reset_interval=num_timesteps,
+                                            input_message_bits=8)
+
             # Create source ring buffer to deliver input spike tensors and connect to network input port
             input_lava = RingBuffer(data=tensors)
             input_lava.s_out.connect(network_lava.inp)
@@ -470,7 +471,10 @@ def evaluate_lava(raw_dataset, net_x_filename, unique_suffix,
             from lava.proc.cyclic_buffer.process import CyclicBuffer
             from lava.utils.loihi2_state_probes import StateProbe
             from lava.utils.system import Loihi2
-        
+
+            # Create network from NetX file
+            network_lava = netx.hdf5.Network(net_config=net_x_filename,
+                                            input_message_bits=8)
             if Loihi2.is_loihi2_available:
                 print(f'Running on {Loihi2.partition}')
             else:
@@ -491,6 +495,12 @@ def evaluate_lava(raw_dataset, net_x_filename, unique_suffix,
             # Run model for each test sample
             for _ in tqdm(raw_dataset_slice):
                 network_lava.run(condition=RunSteps(num_steps=num_timesteps), run_cfg=run_config)
+
+                # reset the voltage after each trial
+                for l in network_lava.layers:
+                    shape = l.neuron.v.shape
+                    l.neuron.v.set(np.zeros(shape, dtype=np.int32))
+                    l.neuron.u.set(np.zeros(shape, dtype=np.int32))
 
             output_v = probe_output_v.time_series.reshape(num_classes, num_timesteps * len(raw_dataset_slice)).T
 
