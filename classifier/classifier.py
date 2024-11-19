@@ -587,24 +587,25 @@ def evaluate_nxkernel(raw_dataset, net_x_filename,
     
     # Run model for each test sample 
     output_v = []
-    for _ in tqdm(range(num_test_samples)):
+    for s in tqdm(range(num_test_samples)):
         for i in range(num_timesteps):
             model.run(1)
+            model.groups[0].neuron.sigma.set(board, tensors[i,s,:].reshape((num_input,)))
             out_neurons= model.groups[-1].neuron
             output_v.append(out_neurons.state.get(board).item())
         # reset the voltage after each trial                                                                    
         # TODO
 
-    # Reshape output                                                                                                
+    # Reshape output
     output_v = np.reshape(output_v, (num_test_samples, num_timesteps, num_classes))
 
-    # Calculate output weighting                                                                                    
+    # Calculate output weighting
     output_weighting = np.exp(-np.arange(num_timesteps) / num_timesteps)
 
-    # For each example, sum weighted output neuron voltage over time                                                
+    # For each example, sum weighted output neuron voltage over time
     sum_v = np.sum(output_v * output_weighting[np.newaxis,:,np.newaxis], axis=1)
 
-    # Find maximum output neuron voltage and compare to label                                                       
+    # Find maximum output neuron voltage and compare to label
     pred = np.argmax(sum_v, axis=1)
     good = np.sum(pred == labels)
 
