@@ -13,7 +13,7 @@ from ml_genn.neurons import LeakyIntegrate, LeakyIntegrateFire, SpikeInput
 from ml_genn.optimisers import Adam
 from ml_genn.serialisers import Numpy
 from ml_genn.synapses import Exponential
-from tonic.datasets import SHD
+from tonic.datasets import SHD, SSC
 from tonic.transforms import CropTime, ToFrame
 
 from hashlib import md5
@@ -140,10 +140,18 @@ class Blend:
         X1_X2 = X1_X2[idx]
         return X1_X2
 
-def load_data(train, dt, num_timesteps, num=None):
+def load_data(train, dataset, dt, num_timesteps, num=None):
     # Get SHD dataset, cropped to maximum timesteps (in us)
-    dataset = SHD(save_to="./data", train=train,
-                  transform=CropTime(max=num_timesteps * dt * 1000.0))
+    transform = CropTime(max=num_timesteps * dt * 1000.0)
+    
+    if dataset == "shd":
+        dataset = SHD(save_to="./data", train=train,
+                      transform=transform)
+    elif dataset == "ssc":
+        dataset = SSC(save_to="./data", split="train" if train else "test",
+                      transform=transform)
+    else:
+        raise RuntimeError(f"Unsupported dataset '{dataset}'")
 
     # Get raw event data
     raw_data = []
@@ -177,8 +185,8 @@ def build_ml_genn_model(sensor_size, num_classes, num_hidden):
     return network, input, hidden, output, input_hidden
 
 def train_genn(raw_dataset, network, serialiser, unique_suffix,
-               input, hidden, output, input_hidden,
-               sensor_size, ordering, num_epochs, dt, num_timesteps, reg_lambda):
+               input, hidden, output, input_hidden, sensor_size, 
+               ordering, num_epochs, dt, num_timesteps, augmentation, reg_lambda):
     # Create EventProp compiler
     compiler = EventPropCompiler(example_timesteps=num_timesteps,
                                  losses="sparse_categorical_crossentropy",
@@ -191,10 +199,12 @@ def train_genn(raw_dataset, network, serialiser, unique_suffix,
 
     # Build classes list
     num_output = np.prod(output.shape)
-    classes = [[] for _ in range(num_output)]
-    for i, (_, label) in enumerate(raw_dataset):
-        classes[label].append(i)
     
+    if augmentation == "shift-blend":
+        classes = [[] for _ in range(num_output)]
+        for i, (_, label) in enumerate(raw_dataset):
+            classes[label].append(i)
+        
     # Compile network
     compiled_net = compiler.compile(network, name=f"classifier_train_{unique_suffix}")
     input_hidden_sg = compiled_net.connection_populations[input_hidden]
@@ -211,8 +221,9 @@ def train_genn(raw_dataset, network, serialiser, unique_suffix,
             # Apply augmentation to events and preprocess
             spikes_train = []
             labels_train = []
-            blended_dataset = blend(raw_dataset, classes)
-            for events, label in blended_dataset:
+            epoch_dataset = (blend(raw_dataset, classes) if augmentation == "shift-blend"
+                             else raw_dataset)
+            for events, label in epoch_dataset:
                 spikes_train.append(preprocess_tonic_spikes(shift(events), ordering,
                                                             sensor_size, dt=dt,
                                                             histogram_thresh=1))
@@ -400,7 +411,9 @@ parser = ArgumentParser()
 parser.add_argument("--mode", choices=["train", "test_genn", "test_lava", "test_loihi"], default="train")
 parser.add_argument("--kernel-profiling", action="store_true", help="Output kernel profiling data")
 parser.add_argument("--plot", action="store_true", help="Plot debug")
-parser.add_argument("--num-epochs", type=int, default=50, help="Number of training epochs")#parser.add_argument("--dataset", choices=["ssc", "shd"], required=True)
+parser.add_argument("--num-epochs", type=int, default=50, help="Number of training epochs")
+parser.add_argument("--dataset", choices=["ssc", "shd"], default="shd", required=True)
+parser.add_argument("--augmentation", choices=["shift", "shift-blend"], default="shift-blend", required=True)
 parser.add_argument("--num-test-samples", type=int, help="Number of testing samples to use")
 parser.add_argument("--num-hidden", type=int, help="Number of hidden neurons")
 parser.add_argument("--reg-lambda", type=float, help="EventProp regularization strength")
@@ -417,10 +430,13 @@ unique_suffix = "_".join(("_".join(str(i) for i in val) if isinstance(val, list)
 
 # Get SHD data
 if args.mode == "train":
-    raw_train_data, sensor_size, ordering, num_classes = load_data(True, args.dt, args.num_timesteps)
-    raw_test_data, _, _, _ = load_data(False, args.dt, args.num_timesteps, args.num_test_samples)
+    raw_train_data, sensor_size, ordering, num_classes = load_data(True, args.dataset, args.dt,
+                                                                   args.num_timesteps)
+    raw_test_data, _, _, _ = load_data(False, args.dataset, args.dt,
+                                       args.num_timesteps, args.num_test_samples)
 else:
-    raw_test_data, sensor_size, ordering, num_classes = load_data(False, args.dt, args.num_timesteps, args.num_test_samples)
+    raw_test_data, sensor_size, ordering, num_classes = load_data(False, args.dataset, args.dt,
+                                                                  args.num_timesteps, args.num_test_samples)
 
 # Build suitable mlGeNN model
 network, input, hidden, output, input_hidden = build_ml_genn_model(sensor_size, num_classes, args.num_hidden)
@@ -431,7 +447,7 @@ if args.mode == "train":
     train_genn(raw_train_data, network, serialiser, unique_suffix,
                 input, hidden, output, input_hidden,
                 sensor_size, ordering, args.num_epochs, 
-                args.dt, args.num_timesteps, args.reg_lambda)
+                args.dt, args.num_timesteps, args.augmentation, args.reg_lambda)
     
 # Load checkpoints and export to NETX
 network.load((args.num_epochs - 1,), serialiser)
