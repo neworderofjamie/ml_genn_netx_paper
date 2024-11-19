@@ -534,8 +534,89 @@ def evaluate_lava(raw_dataset, net_x_filename, unique_suffix,
     log.end_entry(test_checkpoint, num_test_samples, num_correct)
     print(f"Lava test accuracy: {num_correct / num_test_samples*100}%")
 
+def evaluate_nxkernel(raw_dataset, net_x_filename,
+                  sensor_size, num_classes, mode, plot,
+                  dt, num_timesteps, num_test_samples):
+    import lava.lib.dl.netx as netx
+    from nxcore.arch.n3b.n3board import N3Board
+    import nxkernel as nxk
+
+    # Preprocess
+    num_input = int(np.prod(sensor_size))
+    transform = ToFrame(sensor_size=sensor_size, time_window=(1000.0 * dt), include_incomplete=False)
+    tensors = []
+    labels = []
+    for events, label in raw_dataset:
+        # Transform events to tensor
+        tensor = transform(events)
+        print(tensor.shape)
+        assert tensor.shape[0] < num_timesteps
+
+        # Transpose tensor and pad time to max
+        tensors.append(np.pad(np.reshape(np.transpose(tensor), (num_input, -1)),
+                              ((0, 0), (0, num_timesteps - tensor.shape[0]))))
+        labels.append(label)
+
+    # Stack tensors 
+    tensors = np.hstack(tensors).astype(np.int8)
+
+    # Create network from NetX file
+    model = nxk.Module()
+    model.add_sequential([
+        nxk.NcGroup(nxk.kernels.Neuron((num_input,),'eye'))
+    ])
+    import nxkernel.utils.netx as netx
+    model_netx = netx.NetX(net_config=net_x_filename)
+    mdel_nxk = model_netx.create_groups()
+    model.add_sequential(model_nxk)
+    model.setup()
+    from IPython.display import display
+    display(model.connectivity('LR'))
+
+    layer_config = model_netx.net_config['layer']
+    tile_shapes = [ tuple(layer_config[i]['shape'][::-1]) for i in range(len(layer_config)) ]
+    model.partition(tile_shapes=tile_shapes)
+    addrs_list = []
+    offset = 0
+    for num_cores in model.num_cores:
+        addrs_list.append([nxk.system.AddressFactory.make_addr(core_idx=idx + offset) for idx in range(num_cores)])
+        offset += num_cores
+
+    board = N3Board()
+    model.to_nxcore(board, addrs_list)
+    
+    # Run model for each test sample 
+    output_v = []
+    for _ in tqdm(range(num_test_samples)):
+        for i in range(num_timesteps):
+            model.run(1)
+            out_neurons= model.groups[-1].neuron
+            output_v.append(out_neurons.state.get(board).item())
+        # reset the voltage after each trial                                                                    
+        # TODO
+
+    # Reshape output                                                                                                
+    output_v = np.reshape(output_v, (num_test_samples, num_timesteps, num_classes))
+
+    # Calculate output weighting                                                                                    
+    output_weighting = np.exp(-np.arange(num_timesteps) / num_timesteps)
+
+    # For each example, sum weighted output neuron voltage over time                                                
+    sum_v = np.sum(output_v * output_weighting[np.newaxis,:,np.newaxis], axis=1)
+
+    # Find maximum output neuron voltage and compare to label                                                       
+    pred = np.argmax(sum_v, axis=1)
+    good = np.sum(pred == labels)
+
+    print(f"Loihi nxkernel test accuracy: {good/num_test_samples*100}%")
+    if plot:
+        fig, axes = plt.subplots(2, num_test_samples, sharex="col", sharey="row")
+        for a in range(num_test_samples):
+            axes[1, a].plot(output_v[a,:,:])
+        axes[1,0].set_ylabel("Output voltage")
+
 parser = ArgumentParser()
-parser.add_argument("--mode", choices=["train", "test_genn", "test_lava", "test_loihi"], default="train")
+parser.add_argument("--mode", choices=["train", "test_genn", "test_lava", "test_loihi", "test_loihi_nxkernel"], default="train")
 parser.add_argument("--kernel-profiling", action="store_true", help="Output kernel profiling data")
 parser.add_argument("--calc-sop", action="store_true", help="Calculate number of Synaptic Operations")
 parser.add_argument("--plot", action="store_true", help="Plot debug")
@@ -617,6 +698,10 @@ elif args.mode == "test_lava" or args.mode == "test_loihi":
     evaluate_lava(raw_test_data, f"{unique_suffix}.net", unique_suffix,
                   sensor_size, num_classes, args.mode, 
                   args.plot, args.dt, args.num_timesteps, num_test_samples, test_checkpoint)
+elif args.mode == "test_loihi_nxkernel":
+    evaluate_nxkernel(raw_test_data, f"shd_{unique_suffix}.net", unique_suffix,
+                      sensor_size, num_classes, args.plot, args.dt, args.num_timesteps,
+                      num_test_samples, test_checkpoint)
 
 if args.plot:
     plt.show()
