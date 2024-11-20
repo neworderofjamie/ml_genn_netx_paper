@@ -86,7 +86,7 @@ class Blend:
         self.sensor_size = sensor_size
         self.max_time = max_time
         self.n_blend = n_blend
-        
+
 
     def __call__(self, dataset: list, classes: list) -> list:
         # Start with (shallow) copy of original dataset
@@ -97,12 +97,12 @@ class Blend:
             # Pick random example
             idx = np.random.randint(0, len(dataset))
             example_spikes, example_label = dataset[idx]
-            
+
             # Pick another from same class
             idx2 = np.random.randint(0, len(classes[example_label]))
             blend_spikes, blend_label = dataset[classes[example_label][idx2]]
             assert blend_label == example_label
-            
+
             # Blend together to form new dataset
             blended_dataset.append((self.blend(example_spikes, blend_spikes),
                                     example_label))
@@ -143,7 +143,7 @@ class Blend:
 def load_data(train, dataset, dt, num_timesteps, num=None):
     # Get SHD dataset, cropped to maximum timesteps (in us)
     transform = CropTime(max=num_timesteps * dt * 1000.0)
-    
+
     if dataset == "shd":
         dataset = SHD(save_to="./data", train=train,
                       transform=transform)
@@ -174,7 +174,7 @@ def build_ml_genn_model(sensor_size, num_classes, num_hidden):
                             num_classes, name="Output")
 
         # Connections
-        input_hidden = Connection(input, hidden, 
+        input_hidden = Connection(input, hidden,
                                   Dense(Normal(mean=0.03, sd=0.01)),
                                   Exponential(5.0))
         Connection(hidden, hidden, Dense(Normal(mean=0.0, sd=0.02)),
@@ -199,16 +199,16 @@ def train_genn(raw_dataset, network, serialiser, unique_suffix,
 
     # Build classes list
     num_output = np.prod(output.shape)
-    
+
     if augmentation == "shift-blend":
         classes = [[] for _ in range(num_output)]
         for i, (_, label) in enumerate(raw_dataset):
             classes[label].append(i)
-        
+
     # Compile network
     compiled_net = compiler.compile(network, name=f"classifier_train_{unique_suffix}")
     input_hidden_sg = compiled_net.connection_populations[input_hidden]
-    
+
     # Train
     num_hidden = np.prod(hidden.shape)
     with compiled_net:
@@ -242,7 +242,7 @@ def train_genn(raw_dataset, network, serialiser, unique_suffix,
 
             num_silent = np.count_nonzero(hidden_spikes==0)
             print(f"GeNN training epoch: {e}, Silent neurons: {num_silent}, Training accuracy: {100 * metrics[output].result}%")
-            
+
             if num_silent > 0:
                 input_hidden_sg.vars["g"].pull_from_device()
                 g_view = input_hidden_sg.vars["g"].view.reshape((np.prod(input.shape), num_hidden))
@@ -261,7 +261,7 @@ def evaluate_genn(raw_dataset, network, unique_suffix,
                                               sensor_size, dt=dt,
                                               histogram_thresh=1))
         labels.append(label)
-    
+
     compiler = InferenceCompiler(evaluate_timesteps=num_timesteps,
                                  reset_in_syn_between_batches=True,
                                  batch_size=BATCH_SIZE, kernel_profiling=kernel_profiling)
@@ -276,11 +276,11 @@ def evaluate_genn(raw_dataset, network, unique_suffix,
         metrics, cb_data  = compiled_net.evaluate({input: spikes},
                                                   {output: labels},
                                                   callbacks=callbacks)
-        
+
         end_time = perf_counter()
         print(f"GeNN test accuracy: {100 * metrics[output].result}%")
         print(f"GeNN test time = {end_time - start_time}s")
-        
+
         if kernel_profiling:
             print(f"Neuron update time = {compiled_net.genn_model.neuron_update_time}")
             print(f"Presynaptic update time = {compiled_net.genn_model.presynaptic_update_time}")
@@ -291,7 +291,7 @@ def evaluate_genn(raw_dataset, network, unique_suffix,
             for a in range(num_test_samples):
                 axes[0, a].scatter(cb_data["hidden_spikes"][0][a], cb_data["hidden_spikes"][1][a], s=1)
                 axes[1, a].plot(cb_data["output_v"][a])
-            
+
             axes[0, 0].set_ylabel("Hidden neuron ID")
             axes[1, 0].set_ylabel("Output voltage")
 
@@ -299,7 +299,7 @@ def evaluate_lava(raw_dataset, net_x_filename,
                   sensor_size, num_classes, mode, plot,
                   dt, num_timesteps, num_test_samples):
     import lava.lib.dl.netx as netx
-                      
+
     from lava.magma.core.run_configs import Loihi2SimCfg, Loihi2HwCfg
     from lava.magma.core.run_conditions import RunSteps
     from lava.proc.cyclic_buffer.process import CyclicBuffer
@@ -346,7 +346,7 @@ def evaluate_lava(raw_dataset, net_x_filename,
             monitor_hidden.probe(network_lava.layers[0].neuron.s_out, num_test_samples * num_timesteps)
 
         run_config = Loihi2SimCfg(select_tag="fixed_pt")
-        
+
         # Run model for each test sample
         for _ in tqdm(range(num_test_samples)):
             network_lava.run(condition=RunSteps(num_steps=num_timesteps), run_cfg=run_config)
@@ -365,12 +365,12 @@ def evaluate_lava(raw_dataset, net_x_filename,
         input_lava = CyclicBuffer(first_frame=first_tensor,
                                   replay_frames=other_tensors)
         input_lava.s_out.connect(network_lava.inp)
-        
+
         # Create state probe to record output voltages
         probe_output_v = StateProbe(network_lava.layers[-1].neuron.v)
 
         run_config = Loihi2HwCfg(callback_fxs=[probe_output_v])
-        
+
         # Run model for each test sample
         for _ in tqdm(range(num_test_samples)):
             network_lava.run(condition=RunSteps(num_steps=num_timesteps), run_cfg=run_config)
@@ -394,13 +394,13 @@ def evaluate_lava(raw_dataset, net_x_filename,
     if plot:
         hidden_spikes = monitor_hidden.get_data()["neuron"]["s_out"]
         hidden_spikes = np.reshape(hidden_spikes, (num_test_samples, num_timesteps, num_hidden))
-        
+
         fig, axes = plt.subplots(2, num_test_samples, sharex="col", sharey="row")
         for a in range(num_test_samples):
             sample_hidden_spikes = np.where(hidden_spikes[a,:,:] > 0.0)
             axes[0, a].scatter(sample_hidden_spikes[0], sample_hidden_spikes[1], s=1)
             axes[1, a].plot(output_v[a,:,:])
-        
+
         axes[0,0].set_ylabel("Hidden neuron ID")
         axes[1,0].set_ylabel("Output voltage")
 
@@ -412,6 +412,7 @@ parser.add_argument("--mode", choices=["train", "test_genn", "test_lava", "test_
 parser.add_argument("--kernel-profiling", action="store_true", help="Output kernel profiling data")
 parser.add_argument("--plot", action="store_true", help="Plot debug")
 parser.add_argument("--num-epochs", type=int, default=50, help="Number of training epochs")
+parser.add_argument("--test-checkpoint", type=int, help="Which epoch's checkpoints to load for testing")
 parser.add_argument("--dataset", choices=["ssc", "shd"], default="shd", required=True)
 parser.add_argument("--augmentation", choices=["shift", "shift-blend"], default="shift-blend", required=True)
 parser.add_argument("--num-test-samples", type=int, help="Number of testing samples to use")
@@ -426,7 +427,8 @@ args = parser.parse_args()
 unique_suffix = "_".join(("_".join(str(i) for i in val) if isinstance(val, list) 
                          else str(val))
                          for arg, val in vars(args).items()
-                         if arg not in ["mode", "kernel_profiling", "num_test_samples"])
+                         if arg not in ["mode", "kernel_profiling",
+                                        "num_test_samples", "test_checkpoint"])
 
 # Get SHD data
 if args.mode == "train":
@@ -446,11 +448,13 @@ serialiser = Numpy(f"checkpoints_{unique_suffix}")
 if args.mode == "train":
     train_genn(raw_train_data, network, serialiser, unique_suffix,
                 input, hidden, output, input_hidden,
-                sensor_size, ordering, args.num_epochs, 
+                sensor_size, ordering, args.num_epochs,
                 args.dt, args.num_timesteps, args.augmentation, args.reg_lambda)
-    
+
 # Load checkpoints and export to NETX
-network.load((args.num_epochs - 1,), serialiser)
+test_checkpoint = ((args.num_epochs - 1) if args.test_checkpoint is None
+                   else args.test_checkpoint)
+network.load((test_epoch,), serialiser)
 
 export(f"shd_{unique_suffix}.net", input, output, dt=args.dt)
 
@@ -459,7 +463,7 @@ num_test_samples = (len(raw_test_data) if args.num_test_samples is None
                     else args.num_test_samples)
 if args.mode == "test_genn":
     evaluate_genn(raw_test_data, network, unique_suffix,
-                  input, hidden, output, 
+                  input, hidden, output,
                   sensor_size, ordering, args.plot, args.kernel_profiling,
                   args.dt, args.num_timesteps, num_test_samples)
 elif args.mode == "test_lava" or args.mode == "test_loihi":
