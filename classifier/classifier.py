@@ -454,7 +454,7 @@ if args.mode == "train":
 # Load checkpoints and export to NETX
 test_checkpoint = ((args.num_epochs - 1) if args.test_checkpoint is None
                    else args.test_checkpoint)
-network.load((test_epoch,), serialiser)
+network.load((test_checkpoint,), serialiser)
 
 export(f"shd_{unique_suffix}.net", input, output, dt=args.dt)
 
