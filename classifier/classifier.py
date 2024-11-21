@@ -56,7 +56,7 @@ class EaseInSchedule(Callback):
     
     def on_epoch_end(self, epoch, metrics):
         # Calculate correct and update EMAs
-        correct = m.correct / m.total
+        correct = metrics.correct / metrics.total
         self.correct_ema = (self.ema_alpha1 * self.correct_ema) + ((1.0 - self.ema_alpha1) * correct)
         self.correct_ema_slow = (self.ema_alpha2 * self.correct_ema_slow) + ((1.0 - self.ema_alpha2) * correct)
         
