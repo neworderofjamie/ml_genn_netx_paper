@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
 import matplotlib.gridspec as gs
+import seaborn as sns
 
 from itertools import chain
 from pandas import read_csv
@@ -43,16 +44,13 @@ axes[0].set_ylabel("GPU memory [MiB]")
 axes[1].set_ylabel("Training time [s]")
 axes[0].set_ylim((0, 3000))
 axes[1].set_ylim((0, 4000))
-
+axes[1].set_xlabel("Num timesteps")
 axes[0].set_title("A", loc="left")
 axes[1].set_title("B", loc="left")
 
-for a in axes[:2]:
-    a.set_xlabel("Num timesteps")
-    a.grid(axis="y")
-    a.grid(which='minor', alpha=0.3)
-    a.spines['top'].set_visible(False)
-    a.spines['right'].set_visible(False)
+for a in axes:
+    sns.despine(ax=a)
+    a.xaxis.grid(False)
 
 fig.legend([actor_256[0],  mlines.Line2D([],[], color="black"), actor_1024[0],mlines.Line2D([],[], linestyle="--", color="black")], 
            ["256 hidden neurons", "GeNN", "1024 hidden neurons",  "Spyx"], 
