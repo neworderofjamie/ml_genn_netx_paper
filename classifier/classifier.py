@@ -287,7 +287,7 @@ def evaluate_genn(raw_dataset, network, unique_suffix,
             print(f"Reset time = {compiled_net.genn_model.get_custom_update_time('Reset')}")
 
         if plot:
-            fig, axes = plt.subplots(2, num_test_samples, sharex="col", sharey="row")
+            fig, axes = plt.subplots(2, num_test_samples, sharex="col", sharey="row", squeeze=False)
             for a in range(num_test_samples):
                 axes[0, a].scatter(cb_data["hidden_spikes"][0][a], cb_data["hidden_spikes"][1][a], s=1)
                 axes[1, a].plot(cb_data["output_v"][a])
@@ -395,7 +395,7 @@ def evaluate_lava(raw_dataset, net_x_filename,
         hidden_spikes = monitor_hidden.get_data()["neuron"]["s_out"]
         hidden_spikes = np.reshape(hidden_spikes, (num_test_samples, num_timesteps, num_hidden))
 
-        fig, axes = plt.subplots(2, num_test_samples, sharex="col", sharey="row")
+        fig, axes = plt.subplots(2, num_test_samples, sharex="col", sharey="row", squeeze=False)
         for a in range(num_test_samples):
             sample_hidden_spikes = np.where(hidden_spikes[a,:,:] > 0.0)
             axes[0, a].scatter(sample_hidden_spikes[0], sample_hidden_spikes[1], s=1)
