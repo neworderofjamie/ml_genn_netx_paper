@@ -86,7 +86,24 @@ class CSVTrainLog(Callback):
                                   perf_counter() - self.start_time])
         self.file.flush()
 
+class CSVTestLog(Callback):
+    def __init__(self, filename, epoch, output_pop):
+        # Create CSV writer
+        self.file = open(filename, "w")
+        self.csv_writer = csv.writer(self.file, delimiter=",")
+        self.csv_writer.writerow(["Epoch", "Num trials", "Number correct", "Time"])
+        self.epoch = epoch
+        self.output_pop = output_pop
 
+    def on_test_begin(self):
+        self.start_time = perf_counter()
+
+    def on_test_end(self, metrics):
+        m = metrics[self.output_pop]
+        self.csv_writer.writerow([self.epoch, m.total, m.correct, 
+                                  perf_counter() - self.start_time])
+        self.file.flush()
+        
 class Shift:
     def __init__(self, f_shift, sensor_size):
         self.f_shift = f_shift
@@ -277,7 +294,7 @@ def train_genn(raw_dataset, network, serialiser, unique_suffix,
 def evaluate_genn(raw_dataset, network, unique_suffix,
                   input, hidden, output, 
                   sensor_size, ordering, plot, kernel_profiling,
-                  dt, num_timesteps, num_test_samples):
+                  dt, num_timesteps, num_test_samples, test_checkpoint):
     # Preprocess
     spikes = []
     labels = []
@@ -293,7 +310,9 @@ def evaluate_genn(raw_dataset, network, unique_suffix,
     compiled_net = compiler.compile(network, name=f"classifier_test_{unique_suffix}")
 
     with compiled_net:
-        callbacks = ["batch_progress_bar"]
+        callbacks = ["batch_progress_bar", 
+                     CSVTestLog(f"test_output_{unique_suffix}.csv",
+                                test_checkpoint, output)]
         if plot:
             callbacks.extend([SpikeRecorder(hidden, key="hidden_spikes"),
                               VarRecorder(output, "v", key="output_v")])
@@ -495,7 +514,7 @@ if args.mode == "test_genn":
     evaluate_genn(raw_test_data, network, unique_suffix,
                   input, hidden, output,
                   sensor_size, ordering, args.plot, args.kernel_profiling,
-                  args.dt, args.num_timesteps, num_test_samples)
+                  args.dt, args.num_timesteps, num_test_samples, test_checkpoint)
 elif args.mode == "test_lava" or args.mode == "test_loihi":
     evaluate_lava(raw_test_data, f"shd_{unique_suffix}.net", sensor_size, num_classes, 
                   args.mode, args.plot, args.dt, args.num_timesteps, num_test_samples)
