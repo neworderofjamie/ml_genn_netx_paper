@@ -455,6 +455,11 @@ unique_suffix = "_".join(("_".join(str(i) for i in val) if isinstance(val, list)
                          if arg not in ["mode", "kernel_profiling", "plot",
                                         "num_test_samples", "test_checkpoint"])
 
+# When training, create parameters file containing arguments in easier-to-handle way
+if args.mode == "train":
+    with open(f"params_{unique_suffix}.json", "w") as fp:
+        dump(vars(args), fp)
+        
 # Get SHD data
 if args.mode == "train":
     raw_train_data, sensor_size, ordering, num_classes = load_data(True, args.dataset, args.dt,
