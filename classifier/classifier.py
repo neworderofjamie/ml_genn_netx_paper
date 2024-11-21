@@ -29,17 +29,41 @@ from ml_genn.compilers.event_prop_compiler import default_params
 BATCH_SIZE = 32
 
 class EaseInSchedule(Callback):
+    def __init__(self, output_pop, ema_alpha1=0.8, ema_alpha2=0.85, eta_fac=0.5,
+                 min_epoch_eta_fixed=50, baseline_lr=0.001):
+        self.output_pop = output_pop
+        self.ema_alpha1 = ema_alpha1
+        self.ema_alpha2 = ema_alpha2
+        self.eta_fac = eta_fac
+        self.min_epoch_eta_fixed = min_epoch_eta_fixed
+        self.baseline_lr = baseline_lr
+        self.red_lr_last = 0
+        self.correct_ema = 0.0
+        self.correct_ema_slow = 0.0
+
     def set_params(self, compiled_network, **kwargs):
         self._optimisers = [o for o, _ in compiled_network.optimisers]
 
     def on_batch_begin(self, batch):
-        # Set parameter to return value of function
+        # Loop throgh optimisers
         for o in self._optimisers:
-            if o.alpha < 0.001 :
-                o.alpha = (0.001 / 1000.0) * (1.05 ** batch)
+            # If learning rate is less than baseline, 'ease' up to it
+            if o.alpha < self.baseline_lr:
+                o.alpha = (self.baseline_lr / 1000.0) * (1.05 ** batch)
+            # Otherwise, use baseline
             else:
-                o.alpha = 0.001
-
+                o.alpha = self.baseline_lr
+    
+    def on_epoch_end(self, epoch, metrics):
+        # Calculate correct and update EMAs
+        correct = m.correct / m.total
+        self.correct_ema = (self.ema_alpha1 * self.correct_ema) + ((1.0 - self.ema_alpha1) * correct)
+        self.correct_ema_slow = (self.ema_alpha2 * self.correct_ema_slow) + ((1.0 - self.ema_alpha2) * correct)
+        
+        if ((epoch - self.red_lr_last) > self.min_epoch_eta_fixed) and (self.correct_ema <= self.correct_ema_slow):
+            self.baseline_lr *= self.eta_fac
+            self.red_lr_last = epoch
+            print(f"EMA {self.correct_ema}, EMAslow {self.correct_ema_slow}, Reduced LR to {self.baseline_lr}")
 
 class CSVTrainLog(Callback):
     def __init__(self, filename, output_pop):
@@ -212,7 +236,7 @@ def train_genn(raw_dataset, network, serialiser, unique_suffix,
     # Train
     num_hidden = np.prod(hidden.shape)
     with compiled_net:
-        callbacks = [Checkpoint(serialiser), EaseInSchedule(),
+        callbacks = [Checkpoint(serialiser), EaseInSchedule(output),
                      CSVTrainLog(f"train_output_{unique_suffix}.csv", output),
                      SpikeRecorder(hidden, key="hidden_spikes",
                                    record_counts=True)]
