@@ -345,22 +345,16 @@ def evaluate_genn(raw_dataset, network, unique_suffix,
             axes[0, 0].set_ylabel("Hidden neuron ID")
             axes[1, 0].set_ylabel("Output voltage")
 
-def evaluate_lava(raw_dataset, net_x_filename, 
+def evaluate_lava(raw_dataset, net_x_filename, unique_suffix,
                   sensor_size, num_classes, mode, plot,
-                  dt, num_timesteps, num_test_samples):
+                  dt, num_timesteps, num_test_samples, test_checkpoint):
     import lava.lib.dl.netx as netx
 
-    from lava.magma.core.run_configs import Loihi2SimCfg, Loihi2HwCfg
     from lava.magma.core.run_conditions import RunSteps
-    from lava.proc.cyclic_buffer.process import CyclicBuffer
-    from lava.proc.io.source import RingBuffer as SourceRingBuffer
-    from lava.proc.monitor.process import Monitor
-    from lava.utils.loihi2_state_probes import StateProbe
-    from lava.utils.system import Loihi2
 
     # Preprocess
     num_input = int(np.prod(sensor_size))
-    transform = ToFrame(sensor_size=sensor_size, time_window=(1000.0 * dt), include_incomplete=True)
+    transform = ToFrame(sensor_size=sensor_size, time_window=(1000.0 * dt))
     tensors = []
     labels = []
     for events, label in raw_dataset:
@@ -382,9 +376,14 @@ def evaluate_lava(raw_dataset, net_x_filename,
                                      input_message_bits=8)
 
     # If we're evaluating using Lava
-    if mode == "evaluate_lava":
+    log = Log(f"{mode}_output_{unique_suffix}.csv")
+    if mode == "test_lava":
+        from lava.magma.core.run_configs import Loihi2SimCfg
+        from lava.proc.io.source import RingBuffer
+        from lava.proc.monitor.process import Monitor
+    
         # Create source ring buffer to deliver input spike tensors and connect to network input port
-        input_lava = SourceRingBuffer(data=tensors)
+        input_lava = RingBuffer(data=tensors)
         input_lava.s_out.connect(network_lava.inp)
 
         # Create monitor to record output voltages (shape is total timesteps)
@@ -396,14 +395,21 @@ def evaluate_lava(raw_dataset, net_x_filename,
             monitor_hidden.probe(network_lava.layers[0].neuron.s_out, num_test_samples * num_timesteps)
 
         run_config = Loihi2SimCfg(select_tag="fixed_pt")
-
+        
+        
         # Run model for each test sample
+        log.start_entry()
         for _ in tqdm(range(num_test_samples)):
             network_lava.run(condition=RunSteps(num_steps=num_timesteps), run_cfg=run_config)
 
         output_v = monitor_output.get_data()["neuron"]["v"]
     # Otherwise, if we're evaluating on device
     else:
+        from lava.magma.core.run_configs import Loihi2HwCfg
+        from lava.proc.cyclic_buffer.process import CyclicBuffer
+        from lava.utils.loihi2_state_probes import StateProbe
+        from lava.utils.system import Loihi2
+    
         if Loihi2.is_loihi2_available:
             print(f'Running on {Loihi2.partition}')
         else:
@@ -422,6 +428,7 @@ def evaluate_lava(raw_dataset, net_x_filename,
         run_config = Loihi2HwCfg(callback_fxs=[probe_output_v])
 
         # Run model for each test sample
+        log.start_entry(test_checkpoint)
         for _ in tqdm(range(num_test_samples)):
             network_lava.run(condition=RunSteps(num_steps=num_timesteps), run_cfg=run_config)
 
@@ -438,9 +445,9 @@ def evaluate_lava(raw_dataset, net_x_filename,
 
     # Find maximum output neuron voltage and compare to label
     pred = np.argmax(sum_v, axis=1)
-    good = np.sum(pred == labels)
-
-    print(f"Lava test accuracy: {good/num_test_samples*100}%")
+    correct = np.sum(pred == labels)
+    log.end_entry(test_checkpoint, num_test_samples, correct)
+    print(f"Lava test accuracy: {correct / num_test_samples*100}%")
     if plot:
         hidden_spikes = monitor_hidden.get_data()["neuron"]["s_out"]
         hidden_spikes = np.reshape(hidden_spikes, (num_test_samples, num_timesteps, num_hidden))
@@ -511,7 +518,7 @@ test_checkpoint = ((args.num_epochs - 1) if args.test_checkpoint is None
                    else args.test_checkpoint)
 network.load((test_checkpoint,), serialiser)
 
-export(f"shd_{unique_suffix}.net", input, output, dt=args.dt)
+export(f"{unique_suffix}.net", input, output, dt=args.dt)
 
 
 num_test_samples = (len(raw_test_data) if args.num_test_samples is None
@@ -522,8 +529,9 @@ if args.mode == "test_genn":
                   sensor_size, ordering, args.plot, args.kernel_profiling,
                   args.dt, args.num_timesteps, num_test_samples, test_checkpoint)
 elif args.mode == "test_lava" or args.mode == "test_loihi":
-    evaluate_lava(raw_test_data, f"shd_{unique_suffix}.net", sensor_size, num_classes, 
-                  args.mode, args.plot, args.dt, args.num_timesteps, num_test_samples)
+    evaluate_lava(raw_test_data, f"{unique_suffix}.net", unique_suffix,
+                  sensor_size, num_classes, args.mode, 
+                  args.plot, args.dt, args.num_timesteps, num_test_samples, test_checkpoint)
 
 if args.plot:
     plt.show()
