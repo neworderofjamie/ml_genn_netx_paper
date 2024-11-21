@@ -46,8 +46,25 @@ def load_training_data_frame(keys, params_filter_fn=None, path="results"):
     # Build dataframe from dictionary and save
     return concat(data, ignore_index=True)
 
+def load_data_test(data, test_filename, accuracy_key, time_key):
+    if not os.path.exists(test_filename):
+        print(f"ERROR: missing '{test_filename}'")
+        data[accuracy_key].append(None)
+        data[time_key].append(None)
+    else:
+        try:
+            test_data = read_csv(test_filename, delimiter=",")
+            assert len(test_data) == 1
+            last_epoch_test_data = test_data.iloc[0]
+            data[accuracy_key].append((100.0 * (last_epoch_test_data["Number correct"] / last_epoch_test_data["Num trials"])))
+            data[time_key].append(test_data["Time"].sum())
+        except ParserError as ex:
+            print(f"ERROR: unable to parse '{test_filename}: {str(ex)}'")
+            data[accuracy_key].append(None)
+            data[time_key].append(None)
+    
 def load_data_frame(keys, params_filter_fn=None, path="results",
-                    load_train=False, load_test=False,
+                    load_train=False, load_test=False, load_lava=False,
                     load_train_perf=False, load_test_perf=False):
     # Build dictionary to hold data
     data = defaultdict(list)
@@ -91,22 +108,11 @@ def load_data_frame(keys, params_filter_fn=None, path="results",
                         data["train_time"].append(None)
             
             if load_test:
-                test_filename = os.path.join(path, f"test_output_{title[7:]}.csv")
-                if not os.path.exists(test_filename):
-                    print(f"ERROR: missing '{test_filename}'")
-                    data["test_accuracy"].append(None)
-                    data["test_time"].append(None)
-                else:
-                    try:
-                        test_data = read_csv(test_filename, delimiter=",")
-                        assert len(test_data) == 1
-                        last_epoch_test_data = test_data.iloc[0]
-                        data["test_accuracy"].append((100.0 * (last_epoch_test_data["Number correct"] / last_epoch_test_data["Num trials"])))
-                        data["test_time"].append(test_data["Time"].sum())
-                    except ParserError as ex:
-                        print(f"ERROR: unable to parse '{test_filename}: {str(ex)}'")
-                        data["train_accuracy"].append(None)
-                        data["train_time"].append(None)
+                load_data_test(data, os.path.join(path, f"test_output_{title[7:]}.csv"),
+                               "test_accuracy", "test_time")
+            if load_lava:
+                load_data_test(data, os.path.join(path, f"test_lava_output_{title[7:]}.csv"),
+                               "test_lava_accuracy", "test_lava_time")
         
             if load_train_perf:
                 # Load performance log
