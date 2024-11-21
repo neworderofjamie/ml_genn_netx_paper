@@ -1,0 +1,10 @@
+*.pyc
+*.pdb
+*.lib
+*.exp
+*.dll
+
+*.net
+
+**/*_CODE
+/classifier/data/

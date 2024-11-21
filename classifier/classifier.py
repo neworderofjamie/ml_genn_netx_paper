@@ -66,44 +66,50 @@ class EaseInSchedule(Callback):
             self.red_lr_last = epoch
             print(f"EMA {self.correct_ema}, EMAslow {self.correct_ema_slow}, Reduced LR to {self.baseline_lr}")
 
-class CSVTrainLog(Callback):
-    def __init__(self, filename, output_pop):
+class Log:
+    def __init__(self, filename):
         # Create CSV writer
         self.file = open(filename, "w")
         self.csv_writer = csv.writer(self.file, delimiter=",")
 
-        # Write header row if we're not resuming from an existing training run
+        # Write header row
         self.csv_writer.writerow(["Epoch", "Num trials", "Number correct", "Time"])
+    
+    def start_entry(self):
+        self.start_time = perf_counter()
+    
+    def end_entry(self, epoch, total, correct):
+        self.csv_writer.writerow([epoch, total, correct, 
+                                  perf_counter() - self.start_time])
+        self.file.flush()
+
+class CSVTrainLog(Log, Callback):
+    def __init__(self, filename, output_pop):
+        super().__init__(filename)
 
         self.output_pop = output_pop
 
     def on_epoch_begin(self, epoch):
-        self.start_time = perf_counter()
+        self.start_entry()
 
     def on_epoch_end(self, epoch, metrics):
         m = metrics[self.output_pop]
-        self.csv_writer.writerow([epoch, m.total, m.correct, 
-                                  perf_counter() - self.start_time])
-        self.file.flush()
+        self.end_entry(epoch, m.total, m.correct)
 
-class CSVTestLog(Callback):
+class CSVTestLog(Log, Callback):
     def __init__(self, filename, epoch, output_pop):
-        # Create CSV writer
-        self.file = open(filename, "w")
-        self.csv_writer = csv.writer(self.file, delimiter=",")
-        self.csv_writer.writerow(["Epoch", "Num trials", "Number correct", "Time"])
+        super().__init__(filename)
+        
         self.epoch = epoch
         self.output_pop = output_pop
 
     def on_test_begin(self):
-        self.start_time = perf_counter()
+        self.start_entry()
 
     def on_test_end(self, metrics):
         m = metrics[self.output_pop]
-        self.csv_writer.writerow([self.epoch, m.total, m.correct, 
-                                  perf_counter() - self.start_time])
-        self.file.flush()
-        
+        self.end_entry(self.epoch, m.total, m.correct)
+
 class Shift:
     def __init__(self, f_shift, sensor_size):
         self.f_shift = f_shift
