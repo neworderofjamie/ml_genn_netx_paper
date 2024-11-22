@@ -333,9 +333,13 @@ def evaluate_genn(raw_dataset, network, unique_suffix,
         print(f"GeNN test time = {end_time - start_time}s")
 
         if kernel_profiling:
-            print(f"Neuron update time = {compiled_net.genn_model.neuron_update_time}")
-            print(f"Presynaptic update time = {compiled_net.genn_model.presynaptic_update_time}")
-            print(f"Reset time = {compiled_net.genn_model.get_custom_update_time('Reset')}")
+            genn_model = compiled_net.genn_model
+            data = {
+                "neuron_update": genn_model.neuron_update_time,
+                "presynaptic_update": genn_model.presynaptic_update_time,
+                "custom_update_reset": genn_model.get_custom_update_time("Reset")}
+            with open(f"test_kernel_profile_{unique_suffix}.json", "w") as fp:
+                dump(data, fp)
 
         if plot:
             fig, axes = plt.subplots(2, num_test_samples, sharex="col", sharey="row", squeeze=False)
