@@ -299,17 +299,19 @@ def train_genn(raw_dataset, network, serialiser, unique_suffix,
                 input_hidden_sg.vars["g"].push_to_device()
 
 def evaluate_genn(raw_dataset, network, unique_suffix,
-                  input, hidden, output, 
-                  sensor_size, ordering, plot, kernel_profiling,
+                  input, hidden, output, sensor_size, ordering, 
+                  plot, kernel_profiling, calc_sop,
                   dt, num_timesteps, num_test_samples, test_checkpoint):
     # Preprocess
     spikes = []
     labels = []
+    num_input_spikes = 0
     for events, label in raw_dataset:
         spikes.append(preprocess_tonic_spikes(events, ordering,
                                               sensor_size, dt=dt,
                                               histogram_thresh=1))
         labels.append(label)
+        num_input_spikes += len(events)
 
     compiler = InferenceCompiler(evaluate_timesteps=num_timesteps,
                                  reset_in_syn_between_batches=True,
@@ -323,6 +325,10 @@ def evaluate_genn(raw_dataset, network, unique_suffix,
         if plot:
             callbacks.extend([SpikeRecorder(hidden, key="hidden_spikes"),
                               VarRecorder(output, "v", key="output_v")])
+        if calc_sop:
+            callbacks.append(SpikeRecorder(hidden, record_counts=True,
+                                           key="hidden_spike_count"))
+
         start_time = perf_counter()
         metrics, cb_data  = compiled_net.evaluate({input: spikes},
                                                   {output: labels},
@@ -341,6 +347,18 @@ def evaluate_genn(raw_dataset, network, unique_suffix,
             with open(f"test_kernel_profile_{unique_suffix}.json", "w") as fp:
                 dump(data, fp)
 
+        if calc_sop:
+            # Sum number of hidden spikes in each batch
+            num_hidden_spikes = 0
+            for cb_d in cb_data["hidden_spike_count"]:
+                num_hidden_spikes += np.sum(cb_d)
+            
+            num_hidden = np.prod(hidden.shape)
+            num_output = np.prod(output.shape)
+            num_sop = ((num_input_spikes * num_hidden) 
+                       + (num_hidden_spikes * (num_hidden + num_output)))
+            print(f"{num_sop} Synaptic Operations")
+                
         if plot:
             fig, axes = plt.subplots(2, num_test_samples, sharex="col", sharey="row", squeeze=False)
             for a in range(num_test_samples):
@@ -472,6 +490,7 @@ def evaluate_lava(raw_dataset, net_x_filename, unique_suffix,
 parser = ArgumentParser()
 parser.add_argument("--mode", choices=["train", "test_genn", "test_lava", "test_loihi"], default="train")
 parser.add_argument("--kernel-profiling", action="store_true", help="Output kernel profiling data")
+parser.add_argument("--calc-sop", action="store_true", help="Calculate number of Synaptic Operations")
 parser.add_argument("--plot", action="store_true", help="Plot debug")
 parser.add_argument("--num-epochs", type=int, default=50, help="Number of training epochs")
 parser.add_argument("--test-checkpoint", type=int, help="Which epoch's checkpoints to load for testing")
@@ -490,7 +509,7 @@ args = parser.parse_args()
 unique_suffix = "_".join(("_".join(str(i) for i in val) if isinstance(val, list) 
                          else str(val))
                          for arg, val in vars(args).items()
-                         if arg not in ["mode", "kernel_profiling", "plot",
+                         if arg not in ["mode", "kernel_profiling", "calc_sop", "plot",
                                         "num_test_samples", "test_checkpoint"])
 
 # When training, create parameters file containing arguments in easier-to-handle way
@@ -532,8 +551,8 @@ num_test_samples = (len(raw_test_data) if args.num_test_samples is None
                     else args.num_test_samples)
 if args.mode == "test_genn":
     evaluate_genn(raw_test_data, network, unique_suffix,
-                  input, hidden, output,
-                  sensor_size, ordering, args.plot, args.kernel_profiling,
+                  input, hidden, output, sensor_size, ordering, 
+                  args.plot, args.kernel_profiling, args.calc_sop,
                   args.dt, args.num_timesteps, num_test_samples, test_checkpoint)
 elif args.mode == "test_lava" or args.mode == "test_loihi":
     evaluate_lava(raw_test_data, f"{unique_suffix}.net", unique_suffix,
