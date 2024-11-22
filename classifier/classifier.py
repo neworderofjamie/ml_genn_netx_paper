@@ -27,19 +27,17 @@ from tqdm import tqdm
 from ml_genn.compilers.event_prop_compiler import default_params
 
 BATCH_SIZE = 32
-
+EMA_ALPHA1 = 0.8
+EMA_ALPHA2 = 0.85
+ETA_FAC = 0.5,
+MIN_EPOCH_ETA_FIXED = 50
+BASELINE_LR = 0.001
+        
+        
 class EaseInSchedule(Callback):
-    def __init__(self, output_pop, ema_alpha1=0.8, ema_alpha2=0.85, eta_fac=0.5,
-                 min_epoch_eta_fixed=50, baseline_lr=0.001):
-        self.output_pop = output_pop
-        self.ema_alpha1 = ema_alpha1
-        self.ema_alpha2 = ema_alpha2
-        self.eta_fac = eta_fac
-        self.min_epoch_eta_fixed = min_epoch_eta_fixed
+    def __init__(self, output_pop, baseline_lr):
         self.baseline_lr = baseline_lr
-        self.red_lr_last = 0
-        self.correct_ema = 0.0
-        self.correct_ema_slow = 0.0
+        self.output_pop = output_pop
 
     def set_params(self, compiled_network, **kwargs):
         self._optimisers = [o for o, _ in compiled_network.optimisers]
@@ -54,18 +52,6 @@ class EaseInSchedule(Callback):
             else:
                 o.alpha = self.baseline_lr
     
-    def on_epoch_end(self, epoch, metrics):
-        # Calculate correct and update EMAs
-        m = metrics[self.output_pop]
-        correct = m.correct / m.total
-        self.correct_ema = (self.ema_alpha1 * self.correct_ema) + ((1.0 - self.ema_alpha1) * correct)
-        self.correct_ema_slow = (self.ema_alpha2 * self.correct_ema_slow) + ((1.0 - self.ema_alpha2) * correct)
-        
-        if ((epoch - self.red_lr_last) > self.min_epoch_eta_fixed) and (self.correct_ema <= self.correct_ema_slow):
-            self.baseline_lr *= self.eta_fac
-            self.red_lr_last = epoch
-            print(f"EMA {self.correct_ema}, EMAslow {self.correct_ema_slow}, Reduced LR to {self.baseline_lr}")
-
 class Log:
     def __init__(self, filename):
         # Create CSV writer
@@ -234,13 +220,14 @@ def build_ml_genn_model(sensor_size, num_classes, num_hidden):
 
 def train_genn(raw_dataset, network, serialiser, unique_suffix,
                input, hidden, output, input_hidden, sensor_size, 
-               ordering, num_epochs, dt, num_timesteps, augmentation, reg_lambda):
+               ordering, num_epochs, dt, seed, num_timesteps, 
+               augmentation, reg_lambda):
     # Create EventProp compiler
     compiler = EventPropCompiler(example_timesteps=num_timesteps,
-                                 losses="sparse_categorical_crossentropy",
+                                 losses="sparse_categorical_crossentropy", rng_seed=args.seed,
                                  reg_lambda_upper=reg_lambda, reg_lambda_lower=reg_lambda, 
                                  reg_nu_upper=14, max_spikes=1500, 
-                                 optimiser=Adam(0.001 / 1000.0), batch_size=BATCH_SIZE)
+                                 optimiser=Adam(BASELINE_LR / 1000.0), batch_size=BATCH_SIZE)
     # Create augmentation objects
     shift = Shift(40.0, sensor_size)
     blend = Blend(0.5, sensor_size, num_timesteps * dt * 1000.0)
@@ -260,11 +247,13 @@ def train_genn(raw_dataset, network, serialiser, unique_suffix,
     # Train
     num_hidden = np.prod(hidden.shape)
     with compiled_net:
-        callbacks = [Checkpoint(serialiser), EaseInSchedule(output),
-                     CSVTrainLog(f"train_output_{unique_suffix}.csv", output),
-                     SpikeRecorder(hidden, key="hidden_spikes",
-                                   record_counts=True)]
+        callbacks = [Checkpoint(serialiser), CSVTrainLog(f"train_output_{unique_suffix}.csv", output),
+                     SpikeRecorder(hidden, key="hidden_spikes", record_counts=True)]
         # Loop through epochs
+        correct_ema = 0.0
+        correct_ema_slow = 0.0
+        lr = BASELINE_LR
+        red_lr_last = 0
         for e in range(num_epochs):
             # Apply augmentation to events and preprocess
             spikes_train = []
@@ -281,7 +270,19 @@ def train_genn(raw_dataset, network, serialiser, unique_suffix,
             metrics, cb_data  = compiled_net.train(
                 {input: spikes_train}, {output: labels_train},
                 start_epoch=e, num_epochs=1, 
-                shuffle=True, callbacks=callbacks)
+                shuffle=True, callbacks=callbacks + [EaseInSchedule(output, lr)])
+
+            # Calculate correct and update EMAs
+            correct = metrics[output].correct / metrics[output].total
+            print(f"EMA {correct_ema}, EMAslow {correct_ema_slow}")
+            correct_ema = (EMA_ALPHA1 * correct_ema) + ((1.0 - EMA_ALPHA1) * correct)
+            correct_ema_slow = (EMA_ALPHA2 * correct_ema_slow) + ((1.0 - EMA_ALPHA2) * correct)
+            
+            if ((e - red_lr_last) > MIN_EPOCH_ETA_FIXED) and (correct_ema <= correct_ema_slow):
+                lr *= ETA_FAC
+                red_lr_last = e
+                print(f"EMA {correct_ema}, EMAslow {correct_ema_slow}, Reduced LR to {lr}")
+
 
             # Sum number of hidden spikes in each batch
             hidden_spikes = np.zeros(num_hidden)
@@ -477,6 +478,7 @@ parser.add_argument("--num-hidden", type=int, help="Number of hidden neurons")
 parser.add_argument("--reg-lambda", type=float, help="EventProp regularization strength")
 parser.add_argument("--dt", type=float, help="Simulation timestep")
 parser.add_argument("--num-timesteps", type=int, required=True, help="Number of simulation timesteps")
+parser.add_argument("--seed", type=int, default=1234, help="Random number generator seed")
 
 args = parser.parse_args()
 
@@ -511,7 +513,8 @@ if args.mode == "train":
     train_genn(raw_train_data, network, serialiser, unique_suffix,
                 input, hidden, output, input_hidden,
                 sensor_size, ordering, args.num_epochs,
-                args.dt, args.num_timesteps, args.augmentation, args.reg_lambda)
+                args.dt, args.seed, args.num_timesteps, 
+                args.augmentation, args.reg_lambda)
 
 # Load checkpoints and export to NETX
 test_checkpoint = ((args.num_epochs - 1) if args.test_checkpoint is None
