@@ -1,0 +1,3 @@
+[submodule "classifier/ml_genn_netx_paper_nx_kernel"]
+	path = classifier/ml_genn_netx_paper_nx_kernel
+	url = ../ml_genn_netx_paper_nx_kernel.git
