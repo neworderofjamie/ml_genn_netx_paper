@@ -3,7 +3,7 @@ import cv2
 import time
 from subprocess import call, check_output, CalledProcessError
 from tempfile import NamedTemporaryFile
-cap = cv2.VideoCapture(1)
+cap = cv2.VideoCapture(0)
 
 THRESHOLD = 26
 
@@ -21,7 +21,7 @@ with open("power.csv", 'w') as csv_file, NamedTemporaryFile(suffix=".png", delet
             cv2.imshow("frame", frame[1])
             
             
-            digit = frame[1][250:400,300:450:]
+            digit = frame[1][250:400,250:450:]
             cv2.imwrite(tmp_file.name, digit)
             cv2.imshow("digit", digit)
             cv2.waitKey(1)

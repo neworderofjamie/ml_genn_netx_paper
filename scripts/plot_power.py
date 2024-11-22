@@ -5,9 +5,9 @@ import plot_settings
 
 
 # CSV filename, 'idle' power, sim time
-data = [("power_fenn.csv", 8.6, 8.7, 36.6),
-        ("power_jetson_gpu.csv", 7.0, 8.0, 77.05),
-        ("power_jetson_cpu.csv", 7.0, 7.9, 119.29)]
+data = [("power_50_shd_shift-blend_256_2.5e-10_1.0_1000.csv", 7.0, 8.0, 77.05),
+        ("power_50_shd_shift-blend_512_5e-10_1.0_1000.csv", 7.0, 8.0, 77.05),
+        ("power_50_shd_shift-blend_1024_5e-11_1.0_1000.csv", 7.0, 8.0, 77.05)]
 
 
 fig, axes = plt.subplots(len(data), figsize=(plot_settings.column_width, 2.25), sharex=True, squeeze=False)
