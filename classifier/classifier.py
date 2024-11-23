@@ -29,7 +29,7 @@ from ml_genn.compilers.event_prop_compiler import default_params
 BATCH_SIZE = 32
 EMA_ALPHA1 = 0.8
 EMA_ALPHA2 = 0.85
-ETA_FAC = 0.5,
+ETA_FAC = 0.5
 MIN_EPOCH_ETA_FIXED = 50
 BASELINE_LR = 0.001
         
