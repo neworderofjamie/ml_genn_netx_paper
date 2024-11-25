@@ -1,5 +1,6 @@
 import csv
 import numpy as np
+import os
 import matplotlib.pyplot as plt
 import logging
 
@@ -189,8 +190,14 @@ def load_data(train, dataset, dt, num_timesteps, num=None):
 
     # Get raw event data
     raw_data = []
-    for i in range(num if num is not None else len(dataset)):
-        raw_data.append(dataset[i])
+    num_examples = len(dataset)
+    if num is None or num > num_examples:
+        for i in range(num_examples):
+            raw_data.append(dataset[i])
+    else:
+        inds = np.random.choice(num_examples, size=num, replace=False)
+        for i in inds:
+            raw_data.append(dataset[i])
 
     return raw_data, dataset.sensor_size, dataset.ordering, len(dataset.classes)
 
@@ -227,7 +234,8 @@ def train_genn(raw_dataset, network, serialiser, unique_suffix,
                                  losses="sparse_categorical_crossentropy", rng_seed=args.seed,
                                  reg_lambda_upper=reg_lambda, reg_lambda_lower=reg_lambda, 
                                  reg_nu_upper=14, max_spikes=1500, 
-                                 optimiser=Adam(BASELINE_LR / 1000.0), batch_size=BATCH_SIZE)
+                                 optimiser=Adam(BASELINE_LR / 1000.0), batch_size=BATCH_SIZE,
+                                 strict_buffer_checking=True)
     # Create augmentation objects
     shift = Shift(40.0, sensor_size)
     blend = Blend(0.5, sensor_size, num_timesteps * dt * 1000.0)
@@ -235,11 +243,20 @@ def train_genn(raw_dataset, network, serialiser, unique_suffix,
     # Build classes list
     num_output = np.prod(output.shape)
 
+    # If augmentation is "shift-blend", build class data structure
     if augmentation == "shift-blend":
         classes = [[] for _ in range(num_output)]
         for i, (_, label) in enumerate(raw_dataset):
             classes[label].append(i)
-
+    # Otherwise, if augmentation is "plain", pre-process all data
+    elif augmentation == "plain":
+        spikes_train = []
+        labels_train = []
+        for events, label in raw_dataset:
+            spikes_train.append(preprocess_tonic_spikes(events, ordering,
+                                                        sensor_size, dt=dt,
+                                                        histogram_thresh=1))
+            labels_train.append(label)
     # Compile network
     compiled_net = compiler.compile(network, name=f"classifier_train_{unique_suffix}")
     input_hidden_sg = compiled_net.connection_populations[input_hidden]
@@ -255,16 +272,17 @@ def train_genn(raw_dataset, network, serialiser, unique_suffix,
         lr = BASELINE_LR
         red_lr_last = 0
         for e in range(num_epochs):
-            # Apply augmentation to events and preprocess
-            spikes_train = []
-            labels_train = []
-            epoch_dataset = (blend(raw_dataset, classes) if augmentation == "shift-blend"
-                             else raw_dataset)
-            for events, label in epoch_dataset:
-                spikes_train.append(preprocess_tonic_spikes(shift(events), ordering,
-                                                            sensor_size, dt=dt,
-                                                            histogram_thresh=1))
-                labels_train.append(label)
+            # If augmentations is required, apply augmentation to events and preprocess
+            if augmentation != "plain":
+                spikes_train = []
+                labels_train = []
+                epoch_dataset = (blend(raw_dataset, classes) if augmentation == "shift-blend"
+                                else raw_dataset)
+                for events, label in epoch_dataset:
+                    spikes_train.append(preprocess_tonic_spikes(shift(events), ordering,
+                                                                sensor_size, dt=dt,
+                                                                histogram_thresh=1))
+                    labels_train.append(label)
 
             # Train epoch
             metrics, cb_data  = compiled_net.train(
@@ -383,7 +401,7 @@ def evaluate_lava(raw_dataset, net_x_filename, unique_suffix,
     for events, label in raw_dataset:
         # Transform events to tensor
         tensor = transform(events)
-        assert tensor.shape[0] < num_timesteps
+        assert tensor.shape[0] <= num_timesteps
 
         # Transpose tensor and pad time to max
         tensors.append(np.pad(np.reshape(np.transpose(tensor), (num_input, -1)),
@@ -495,7 +513,7 @@ parser.add_argument("--plot", action="store_true", help="Plot debug")
 parser.add_argument("--num-epochs", type=int, default=50, help="Number of training epochs")
 parser.add_argument("--test-checkpoint", type=int, help="Which epoch's checkpoints to load for testing")
 parser.add_argument("--dataset", choices=["ssc", "shd"], default="shd", required=True)
-parser.add_argument("--augmentation", choices=["shift", "shift-blend"], default="shift-blend", required=True)
+parser.add_argument("--augmentation", choices=["shift", "shift-blend", "plain"], default="shift-blend", required=True)
 parser.add_argument("--num-test-samples", type=int, help="Number of testing samples to use")
 parser.add_argument("--num-hidden", type=int, help="Number of hidden neurons")
 parser.add_argument("--reg-lambda", type=float, help="EventProp regularization strength")
@@ -540,8 +558,20 @@ if args.mode == "train":
                 args.augmentation, args.reg_lambda)
 
 # Load checkpoints and export to NETX
-test_checkpoint = ((args.num_epochs - 1) if args.test_checkpoint is None
-                   else args.test_checkpoint)
+if args.test_checkpoint is not None:
+    test_checkpoint = args.test_checkpoint
+else:
+    train_output_file = f"train_output_{unique_suffix}.csv"
+    if os.path.exists(train_output_file):
+        train_data = np.loadtxt(train_output_file, delimiter=",", skiprows=1)
+        
+        accuracy = train_data[:,2] / train_data[:,1]
+        test_checkpoint = int(train_data[np.argmax(accuracy),0])
+        print(f"Using trained checkpoint {test_checkpoint}")
+    else:
+        print("WARNING: training output file not found, using last checkpoint")
+        test_checkpoint = args.num_epochs - 1
+
 network.load((test_checkpoint,), serialiser)
 
 export(f"{unique_suffix}.net", input, output, dt=args.dt)
