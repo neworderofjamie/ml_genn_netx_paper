@@ -31,8 +31,6 @@ spyx_df = read_csv("spyx_genn.csv", delimiter=",")
 spyx_df = spyx_df.drop(columns=["Thomas time [s]", "Thomas peak GPU [mb]", "Thomas dataset GPU [mb]",
                                 "Thomas neuron time [s]", "Thomas neuron time [s]"])
 
-
-
 # Join and drop duplicate columns
 data = spyx_df.merge(genn_df, "left", left_on=["Num hidden", "Timestep [ms]"], right_on=["num_hidden", "dt"])
 data = data.drop(columns=["num_hidden", "dt"])
