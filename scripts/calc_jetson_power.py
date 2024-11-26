@@ -27,6 +27,7 @@ df = df.drop(columns=["test_accuracy", "test_neuron_update_time",
                       "test_custom_update_batch_softmax_3_time", "test_custom_update_spike_count_reduce_time",
                       "test_custom_update_zero_out_post_time"])
 
+df["time_per_timestep"] = 1e6 * (df["test_gpu_time"] / (num_examples * 1000))
 df["total_inference_energy"] = df["test_time"] * sim_power
 df["total_sim_energy"] = df["test_gpu_time"] * (sim_power - idle_power)
 df["sim_energy_per_example"] = df["total_sim_energy"] / num_examples
