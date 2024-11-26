@@ -11,6 +11,8 @@ from pandas import read_csv
 
 import plot_settings
 
+genn_peak_memory = {(256, 1): 502, (256, 2): 470, (256, 5): 468,
+                    (1024, 2): 970, (1024, 5): 968}
 
 # Load new GeNN data
 genn_df = load_data_frame(["dt", "num_hidden"], lambda p: p["augmentation"] == "plain" and p["seed"] == 1234 and p["num_hidden"] == 256,
