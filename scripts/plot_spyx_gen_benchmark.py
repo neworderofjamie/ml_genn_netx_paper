@@ -17,7 +17,7 @@ data = data.sort_values(by="Timestep [ms]", ascending=False)
 data_1024_hidden = data[data["Num hidden"] == 1024]
 data_256_hidden = data[data["Num hidden"] == 256]
 
-fig, axes = plt.subplots(2, sharex=True, frameon=False, figsize=(plot_settings.column_width, 3.0))
+fig, axes = plt.subplots(1, 2, frameon=False, figsize=(plot_settings.column_width, 1.75))
 
 
 # Plot memory
@@ -44,11 +44,11 @@ axes[0].set_ylabel("GPU memory [MiB]")
 axes[1].set_ylabel("Training time [s]")
 axes[0].set_ylim((0, 3000))
 axes[1].set_ylim((0, 4000))
-axes[1].set_xlabel("Num timesteps")
 axes[0].set_title("A", loc="left")
 axes[1].set_title("B", loc="left")
 
 for a in axes:
+    a.set_xlabel("Num timesteps")
     sns.despine(ax=a)
     a.xaxis.grid(False)
 
@@ -56,7 +56,7 @@ fig.legend([actor_256[0],  mlines.Line2D([],[], color="black"), actor_1024[0],ml
            ["256 hidden neurons", "GeNN", "1024 hidden neurons",  "Spyx"], 
            loc="lower center", ncol=2, frameon=False)
 
-fig.tight_layout(pad=0, rect=[0.0, 0.15, 1.0, 1.0])
+fig.tight_layout(pad=0, rect=[0.0, 0.225, 1.0, 1.0])
 
 
 fig.savefig("spyx_genn_benchmark.pdf")
