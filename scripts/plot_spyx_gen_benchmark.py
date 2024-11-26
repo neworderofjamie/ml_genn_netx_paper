@@ -1,16 +1,39 @@
-import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
 import matplotlib.gridspec as gs
+import numpy as np
+import os
 import seaborn as sns
 
+from data_utils import load_data_frame
 from itertools import chain
 from pandas import read_csv
 
 import plot_settings
 
-data = read_csv("spyx_genn.csv", delimiter=",")
 
+# Load new GeNN data
+genn_df = load_data_frame(["dt", "num_hidden"], lambda p: p["augmentation"] == "plain" and p["seed"] == 1234 and p["num_hidden"] == 256,
+                          path=os.path.join("..", "classifier"),
+                          load_train=True, load_train_perf=True)
+
+# Calculate total GPU training time
+genn_df["train_gpu_time"] = (genn_df["train_neuron_update_time"] + genn_df["train_presynaptic_update_time"] + genn_df["train_custom_update_reset_time"]
+                             + genn_df["train_custom_update_gradient_batch_reduce_time"] + genn_df["train_custom_update_gradient_learn_time"]
+                             + genn_df["train_custom_update_batch_softmax_1_time"] + genn_df["train_custom_update_batch_softmax_2_time"] 
+                             + genn_df["train_custom_update_batch_softmax_3_time"] + genn_df["train_custom_update_spike_count_reduce_time"]
+                             + genn_df["train_custom_update_zero_out_post_time"])
+
+# Load old GeNN and Spyx data and drop GeNN columns
+spyx_df = read_csv("spyx_genn.csv", delimiter=",")
+spyx_df = spyx_df.drop(columns=["Thomas time [s]", "Thomas peak GPU [mb]", "Thomas dataset GPU [mb]",
+                                "Thomas neuron time [s]", "Thomas neuron time [s]"])
+
+
+
+# Join and drop duplicate columns
+data = spyx_df.merge(genn_df, "left", left_on=["Num hidden", "Timestep [ms]"], right_on=["num_hidden", "dt"])
+data = data.drop(columns=["num_hidden", "dt"])
 
 data = data.sort_values(by="Timestep [ms]", ascending=False)
 
@@ -34,9 +57,8 @@ axes[0].plot(1000.0 / data_256_hidden["Timestep [ms]"],
              data_256_hidden["Spyx platform peak GPU [mb]"] - data_256_hidden["Spyx dataset GPU [mb]"],
              marker="o", color=actor_256[0].get_color(), linestyle="--")
 
-
-axes[1].plot(1000.0 / data_1024_hidden["Timestep [ms]"], data_1024_hidden["Thomas time [s]"] + data_1024_hidden["Thomas build load time [s]"], marker="o", color=actor_1024[0].get_color())
-axes[1].plot(1000.0 / data_256_hidden["Timestep [ms]"], data_256_hidden["Thomas time [s]"] + data_256_hidden["Thomas build load time [s]"], marker="o", color=actor_256[0].get_color())
+axes[1].plot(1000.0 / data_1024_hidden["Timestep [ms]"], data_1024_hidden["train_gpu_time"] + data_1024_hidden["Thomas build load time [s]"], marker="o", color=actor_1024[0].get_color())
+axes[1].plot(1000.0 / data_256_hidden["Timestep [ms]"], data_256_hidden["train_gpu_time"] + data_256_hidden["Thomas build load time [s]"],, marker="o", color=actor_256[0].get_color())
 axes[1].plot(1000.0 / data_1024_hidden["Timestep [ms]"], data_1024_hidden["Spyx time default [s]"], marker="o", color=actor_1024[0].get_color(), linestyle="--")
 axes[1].plot(1000.0 / data_256_hidden["Timestep [ms]"], data_256_hidden["Spyx time default [s]"], marker="o", color=actor_256[0].get_color(), linestyle="--")
 
