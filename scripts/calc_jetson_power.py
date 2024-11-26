@@ -23,7 +23,9 @@ sim_power = df["num_hidden"].map(power)
 df = df.drop(columns=["test_accuracy", "test_neuron_update_time", 
                       "test_presynaptic_update_time", "test_custom_update_reset_time",
                       "test_custom_update_gradient_batch_reduce_time", "test_custom_update_gradient_learn_time",
-                      "test_custom_update_softmax_1_time", "test_custom_update_softmax_2_time"])
+                      "test_custom_update_batch_softmax_1_time", "test_custom_update_batch_softmax_2_time",
+                      "test_custom_update_batch_softmax_3_time", "test_custom_update_spike_count_reduce_time",
+                      "test_custom_update_zero_out_post_time"])
 
 df["total_inference_energy"] = df["test_time"] * sim_power
 df["total_sim_energy"] = df["test_gpu_time"] * (sim_power - idle_power)

@@ -75,8 +75,9 @@ def load_data_frame(keys, params_filter_fn=None, path="results",
         with open(name) as fp:
             params = load(fp)
         
-        perf_keys = ["neuron_update", "presynaptic_update", "custom_update_gradient_batch_reduce",
-                     "custom_update_gradient_learn", "custom_update_reset", "custom_update_softmax_1","custom_update_softmax_2"]
+        perf_keys = ["neuron_update", "presynaptic_update", "custom_update_reset", "custom_update_gradient_batch_reduce",
+                     "custom_update_gradient_learn", "custom_update_batch_softmax_1", "custom_update_batch_softmax_2",
+                     "custom_update_batch_softmax_3", "custom_update_spike_count_reduce", "custom_update_zero_out_post"]
         if params_filter_fn is None or params_filter_fn(params):            
             # Get title from file
             title = os.path.splitext(os.path.basename(name))[0]
