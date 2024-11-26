@@ -227,15 +227,15 @@ def build_ml_genn_model(sensor_size, num_classes, num_hidden):
 
 def train_genn(raw_dataset, network, serialiser, unique_suffix,
                input, hidden, output, input_hidden, sensor_size, 
-               ordering, num_epochs, dt, seed, num_timesteps, 
-               augmentation, reg_lambda):
+               ordering, num_epochs, dt, seed, kernel_profiling,
+               num_timesteps, augmentation, reg_lambda):
     # Create EventProp compiler
     compiler = EventPropCompiler(example_timesteps=num_timesteps,
                                  losses="sparse_categorical_crossentropy", rng_seed=args.seed,
                                  reg_lambda_upper=reg_lambda, reg_lambda_lower=reg_lambda, 
                                  reg_nu_upper=14, max_spikes=1500, 
                                  optimiser=Adam(BASELINE_LR / 1000.0), batch_size=BATCH_SIZE,
-                                 strict_buffer_checking=True)
+                                 kernel_profiling=kernel_profiling)
     # Create augmentation objects
     shift = Shift(40.0, sensor_size)
     blend = Blend(0.5, sensor_size, num_timesteps * dt * 1000.0)
@@ -315,6 +315,22 @@ def train_genn(raw_dataset, network, serialiser, unique_suffix,
                 g_view = input_hidden_sg.vars["g"].view.reshape((np.prod(input.shape), num_hidden))
                 g_view[:,hidden_spikes==0] += 0.002
                 input_hidden_sg.vars["g"].push_to_device()
+        
+        if kernel_profiling:
+            genn_model = compiled_net.genn_model
+            data = {
+                "neuron_update": genn_model.neuron_update_time,
+                "presynaptic_update": genn_model.presynaptic_update_time,
+                "custom_update_reset": genn_model.get_custom_update_time("Reset"),
+                "custom_update_gradient_batch_reduce": genn_model.get_custom_update_time("GradientBatchReduce"),
+                "custom_update_gradient_learn": genn_model.get_custom_update_time("GradientLearn"),
+                "custom_update_batch_softmax_1": genn_model.get_custom_update_time("BatchSoftmax1"),
+                "custom_update_batch_softmax_2": genn_model.get_custom_update_time("BatchSoftmax2"),
+                "custom_update_batch_softmax_3": genn_model.get_custom_update_time("BatchSoftmax3"),
+                "custom_update_spike_count_reduce": genn_model.get_custom_update_time("SpikeCountReduce"),
+                "custom_update_zero_out_post": genn_model.get_custom_update_time("ZeroOutPost")}
+            with open(f"train_kernel_profile_{unique_suffix}.json", "w") as fp:
+                dump(data, fp)
 
 def evaluate_genn(raw_dataset, network, unique_suffix,
                   input, hidden, output, sensor_size, ordering, 
@@ -554,8 +570,8 @@ if args.mode == "train":
     train_genn(raw_train_data, network, serialiser, unique_suffix,
                 input, hidden, output, input_hidden,
                 sensor_size, ordering, args.num_epochs,
-                args.dt, args.seed, args.num_timesteps, 
-                args.augmentation, args.reg_lambda)
+                args.dt, args.seed, args.kernel_profiling,
+                args.num_timesteps, args.augmentation, args.reg_lambda)
 
 # Load checkpoints and export to NETX
 if args.test_checkpoint is not None:
