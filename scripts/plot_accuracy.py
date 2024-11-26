@@ -50,7 +50,10 @@ df = load_data_frame(keys, lambda p: p["dt"] == 1.0,
 axes_df = df.groupby(axis_group_params, as_index=False, dropna=False)
 fig, axes = plt.subplots(1, len(axes_df), sharey=True, figsize=(column_width, 1.75))
 for (name, ax_df), ax in zip(axes_df, axes):
-    ax.set_title(name[0].upper())
+    if isinstance(name, str):
+        ax.set_title(name.upper())
+    else:
+        ax.set_title(name[0].upper())
     ax.set_xlabel("Hidden layer size")
     actors = plot_accuracy_axis(ax_df, ax, bar_group_params)
     
