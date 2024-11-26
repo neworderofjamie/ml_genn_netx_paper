@@ -32,7 +32,7 @@ def plot_accuracy_axis(df, axis, bar_group_params):
 
     sns.despine(ax=axis)
     ax.xaxis.grid(False)
-    axis.set_yticks([0.0, 25.0, 50.0, 75.0, 100.0])
+    axis.set_yticks([0.0, 20.0, 40.0, 60.0, 80.0, 100.0])
     axis.set_xticks(np.arange(len(xticks)) + 0.3)
     
     axis.set_xticklabels(xticks)
@@ -43,7 +43,7 @@ axis_group_params = ["dataset"]
 bar_group_params = ["num_hidden"]
 
 keys = bar_group_params + axis_group_params
-df = load_data_frame(keys, lambda p: p["dt"] == 1.0,
+df = load_data_frame(keys, lambda p: p["dt"] == 1.0 and p["augmentation"] != "plain",
                      path=os.path.join("..", "classifier"),
                      load_train=True, load_test=True, load_lava=True)
     
