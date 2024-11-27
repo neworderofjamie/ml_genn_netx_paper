@@ -630,9 +630,10 @@ elif args.mode == "test_lava" or args.mode == "test_loihi":
                   sensor_size, num_classes, args.mode, 
                   args.plot, args.dt, args.num_timesteps, num_test_samples, test_checkpoint)
 elif args.mode == "test_loihi_nxkernel":
-    evaluate_nxkernel(raw_test_data, f"shd_{unique_suffix}.net", unique_suffix,
+    from ml_genn_netx_paper_nx_kernel.evaluate_nxkernel import evaluate_nxkernel
+    evaluate_nxkernel(raw_test_data, f"{unique_suffix}.net", unique_suffix,
                       sensor_size, num_classes, args.plot, args.dt, args.num_timesteps,
-                      num_test_samples, test_checkpoint)
+                      num_test_samples)
 
 if args.plot:
     plt.show()
