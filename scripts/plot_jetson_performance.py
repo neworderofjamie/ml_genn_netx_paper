@@ -79,7 +79,7 @@ axes[-1].set_xticks(np.arange(len(xticks)) + 0.3)
 axes[-1].set_xticklabels(xticks)
 
 fig.align_ylabels(axes)
-fig.legend([jetson_actor], ["Jetson Xavier NX"],
+fig.legend([jetson_actor], ["Jetson Orin Nano"],
             loc="lower center", ncol=2, frameon=False)
 fig.tight_layout(pad=0, rect=[0.0, 0.1, 1.0, 1.0])
 
