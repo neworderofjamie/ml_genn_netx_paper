@@ -412,114 +412,117 @@ def evaluate_lava(raw_dataset, net_x_filename, unique_suffix,
     # Preprocess
     num_input = int(np.prod(sensor_size))
     transform = ToFrame(sensor_size=sensor_size, time_window=(1000.0 * dt))
-    tensors = []
-    labels = []
-    for events, label in raw_dataset:
-        # Transform events to tensor
-        tensor = transform(events)
-        assert tensor.shape[0] <= num_timesteps
 
-        # Transpose tensor and pad time to max
-        tensors.append(np.pad(np.reshape(np.transpose(tensor), (num_input, -1)),
-                              ((0, 0), (0, num_timesteps - tensor.shape[0]))))
-        labels.append(label)
-
-    # Stack tensors
-    tensors = np.hstack(tensors).astype(np.int8)
-
-    # Create network from NetX file
-    network_lava = netx.hdf5.Network(net_config=net_x_filename, 
-                                     reset_interval=num_timesteps,
-                                     input_message_bits=8)
-
-    # If we're evaluating using Lava
     log = Log(f"{mode}_output_{unique_suffix}.csv")
-    if mode == "test_lava":
-        from lava.magma.core.run_configs import Loihi2SimCfg
-        from lava.proc.io.source import RingBuffer
-        from lava.proc.monitor.process import Monitor
-    
-        # Create source ring buffer to deliver input spike tensors and connect to network input port
-        input_lava = RingBuffer(data=tensors)
-        input_lava.s_out.connect(network_lava.inp)
+    log.start_entry()
+    num_correct = 0
+    for i in range(0, num_test_samples, 3000):
+        raw_dataset_slice = raw_dataset[i:i + 3000]
+        tensors = []
+        labels = []
+        for events, label in raw_dataset_slice:
+            # Transform events to tensor
+            tensor = transform(events)
+            assert tensor.shape[0] <= num_timesteps
 
-        # Create monitor to record output voltages (shape is total timesteps)
-        monitor_output = Monitor()
-        monitor_output.probe(network_lava.layers[-1].neuron.v, num_test_samples * num_timesteps)
+            # Transpose tensor and pad time to max
+            tensors.append(np.pad(np.reshape(np.transpose(tensor), (num_input, -1)),
+                                ((0, 0), (0, num_timesteps - tensor.shape[0]))))
+            labels.append(label)
+
+        # Stack tensors
+        tensors = np.hstack(tensors).astype(np.int8)
+
+        # Create network from NetX file
+        network_lava = netx.hdf5.Network(net_config=net_x_filename, 
+                                        reset_interval=num_timesteps,
+                                        input_message_bits=8)
+
+        # If we're evaluating using Lava
+        if mode == "test_lava":
+            from lava.magma.core.run_configs import Loihi2SimCfg
+            from lava.proc.io.source import RingBuffer
+            from lava.proc.monitor.process import Monitor
+        
+            # Create source ring buffer to deliver input spike tensors and connect to network input port
+            input_lava = RingBuffer(data=tensors)
+            input_lava.s_out.connect(network_lava.inp)
+
+            # Create monitor to record output voltages (shape is total timesteps)
+            monitor_output = Monitor()
+            monitor_output.probe(network_lava.layers[-1].neuron.v, len(raw_dataset_slice) * num_timesteps)
+
+            if plot:
+                monitor_hidden = Monitor()
+                monitor_hidden.probe(network_lava.layers[0].neuron.s_out, len(raw_dataset_slice) * num_timesteps)
+
+            run_config = Loihi2SimCfg(select_tag="fixed_pt")
+            
+            
+            # Run model for each test sample
+            for _ in tqdm(raw_dataset_slice):
+                network_lava.run(condition=RunSteps(num_steps=num_timesteps), run_cfg=run_config)
+
+            output_v = monitor_output.get_data()["neuron"]["v"]
+        # Otherwise, if we're evaluating on device
+        else:
+            from lava.magma.core.run_configs import Loihi2HwCfg
+            from lava.proc.cyclic_buffer.process import CyclicBuffer
+            from lava.utils.loihi2_state_probes import StateProbe
+            from lava.utils.system import Loihi2
+        
+            if Loihi2.is_loihi2_available:
+                print(f'Running on {Loihi2.partition}')
+            else:
+                raise RuntimeError("Loihi2 compiler not available")
+
+            # Create cyclic buffer and connect to network input
+            first_tensor = tensors[:,0]
+            other_tensors = tensors[:,1:]
+            input_lava = CyclicBuffer(first_frame=first_tensor,
+                                    replay_frames=other_tensors)
+            input_lava.s_out.connect(network_lava.inp)
+
+            # Create state probe to record output voltages
+            probe_output_v = StateProbe(network_lava.layers[-1].neuron.v)
+
+            run_config = Loihi2HwCfg(callback_fxs=[probe_output_v])
+
+            # Run model for each test sample
+            for _ in tqdm(raw_dataset_slice):
+                network_lava.run(condition=RunSteps(num_steps=num_timesteps), run_cfg=run_config)
+
+            output_v = probe_output_v.time_series.reshape(num_classes, num_timesteps * len(raw_dataset_slice)).T
+
+        # Reshape output
+        output_v = np.reshape(output_v, (len(raw_dataset_slice), num_timesteps, num_classes))
+
+        # Calculate output weighting
+        output_weighting = np.exp(-np.arange(num_timesteps) / num_timesteps)
+
+        # For each example, sum weighted output neuron voltage over time
+        sum_v = np.sum(output_v * output_weighting[np.newaxis,:,np.newaxis], axis=1)
+
+        # Find maximum output neuron voltage and compare to label
+        pred = np.argmax(sum_v, axis=1)
+        num_correct += np.sum(pred == labels)
 
         if plot:
-            monitor_hidden = Monitor()
-            monitor_hidden.probe(network_lava.layers[0].neuron.s_out, num_test_samples * num_timesteps)
+            hidden_spikes = monitor_hidden.get_data()["neuron"]["s_out"]
+            hidden_spikes = np.reshape(hidden_spikes, (len(raw_dataset_slice), num_timesteps, num_hidden))
 
-        run_config = Loihi2SimCfg(select_tag="fixed_pt")
-        
-        
-        # Run model for each test sample
-        log.start_entry()
-        for _ in tqdm(range(num_test_samples)):
-            network_lava.run(condition=RunSteps(num_steps=num_timesteps), run_cfg=run_config)
+            fig, axes = plt.subplots(2, len(raw_dataset_slice), sharex="col", sharey="row", squeeze=False)
+            for a, _ in enumerate(raw_dataset_slice):
+                sample_hidden_spikes = np.where(hidden_spikes[a,:,:] > 0.0)
+                axes[0, a].scatter(sample_hidden_spikes[0], sample_hidden_spikes[1], s=1)
+                axes[1, a].plot(output_v[a,:,:])
 
-        output_v = monitor_output.get_data()["neuron"]["v"]
-    # Otherwise, if we're evaluating on device
-    else:
-        from lava.magma.core.run_configs import Loihi2HwCfg
-        from lava.proc.cyclic_buffer.process import CyclicBuffer
-        from lava.utils.loihi2_state_probes import StateProbe
-        from lava.utils.system import Loihi2
-    
-        if Loihi2.is_loihi2_available:
-            print(f'Running on {Loihi2.partition}')
-        else:
-            raise RuntimeError("Loihi2 compiler not available")
+            axes[0,0].set_ylabel("Hidden neuron ID")
+            axes[1,0].set_ylabel("Output voltage")
+        network_lava.stop()
 
-        # Create cyclic buffer and connect to network input
-        first_tensor = tensors[:,0]
-        other_tensors = tensors[:,1:]
-        input_lava = CyclicBuffer(first_frame=first_tensor,
-                                  replay_frames=other_tensors)
-        input_lava.s_out.connect(network_lava.inp)
-
-        # Create state probe to record output voltages
-        probe_output_v = StateProbe(network_lava.layers[-1].neuron.v)
-
-        run_config = Loihi2HwCfg(callback_fxs=[probe_output_v])
-
-        # Run model for each test sample
-        log.start_entry(test_checkpoint)
-        for _ in tqdm(range(num_test_samples)):
-            network_lava.run(condition=RunSteps(num_steps=num_timesteps), run_cfg=run_config)
-
-        output_v = probe_output_v.time_series.reshape(num_classes, num_timesteps * num_test_samples).T
-
-    # Reshape output
-    output_v = np.reshape(output_v, (num_test_samples, num_timesteps, num_classes))
-
-    # Calculate output weighting
-    output_weighting = np.exp(-np.arange(num_timesteps) / num_timesteps)
-
-    # For each example, sum weighted output neuron voltage over time
-    sum_v = np.sum(output_v * output_weighting[np.newaxis,:,np.newaxis], axis=1)
-
-    # Find maximum output neuron voltage and compare to label
-    pred = np.argmax(sum_v, axis=1)
-    correct = np.sum(pred == labels)
-    log.end_entry(test_checkpoint, num_test_samples, correct)
-    print(f"Lava test accuracy: {correct / num_test_samples*100}%")
-    if plot:
-        hidden_spikes = monitor_hidden.get_data()["neuron"]["s_out"]
-        hidden_spikes = np.reshape(hidden_spikes, (num_test_samples, num_timesteps, num_hidden))
-
-        fig, axes = plt.subplots(2, num_test_samples, sharex="col", sharey="row", squeeze=False)
-        for a in range(num_test_samples):
-            sample_hidden_spikes = np.where(hidden_spikes[a,:,:] > 0.0)
-            axes[0, a].scatter(sample_hidden_spikes[0], sample_hidden_spikes[1], s=1)
-            axes[1, a].plot(output_v[a,:,:])
-
-        axes[0,0].set_ylabel("Hidden neuron ID")
-        axes[1,0].set_ylabel("Output voltage")
-
-    network_lava.stop()
-
+    log.end_entry(test_checkpoint, num_test_samples, num_correct)
+    print(f"Lava test accuracy: {num_correct / num_test_samples*100}%")
 
 parser = ArgumentParser()
 parser.add_argument("--mode", choices=["train", "test_genn", "test_lava", "test_loihi"], default="train")
