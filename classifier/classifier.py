@@ -27,7 +27,7 @@ from tqdm import tqdm
 
 from ml_genn.compilers.event_prop_compiler import default_params
 
-BATCH_SIZE = 32
+BATCH_SIZE = int(os.environ['BATCH_SIZE']) if 'BATCH_SIZE' in os.environ else 32
 EMA_ALPHA1 = 0.8
 EMA_ALPHA2 = 0.85
 ETA_FAC = 0.5
@@ -371,6 +371,19 @@ def evaluate_genn(raw_dataset, network, unique_suffix,
         end_time = perf_counter()
         print(f"GeNN test accuracy: {100 * metrics[output].result}%")
         print(f"GeNN test time = {end_time - start_time}s")
+        
+        if plot:
+            # Save predictions to numpy file
+            output_v = np.array(cb_data['output_v'])
+            # Calculate output weighting
+            output_weighting = np.exp(-np.arange(num_timesteps) / num_timesteps)
+            # For each example, sum weighted output neuron voltage over time
+            sum_v = np.sum(
+                output_v * output_weighting[np.newaxis, :, np.newaxis], axis=1)
+            # Find maximum output neuron voltage and compare to label
+            pred = np.argmax(sum_v, axis=1)
+            good = np.sum(pred == labels)
+            np.save(f"pred_{unique_suffix}.npy", pred)
 
         if kernel_profiling:
             genn_model = compiled_net.genn_model
