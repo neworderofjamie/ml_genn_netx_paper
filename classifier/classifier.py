@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import logging
 
 from argparse import ArgumentParser
+from multiprocessing import Event, Process
 from ml_genn import Connection, Network, Population
 from ml_genn.callbacks import Callback, Checkpoint, SpikeRecorder, VarRecorder
 from ml_genn.compilers import EventPropCompiler, InferenceCompiler
@@ -22,7 +23,7 @@ from json import dump
 from ml_genn.utils.data import preprocess_tonic_spikes
 from ml_genn_netx import export
 from random import choice
-from time import perf_counter
+from time import perf_counter, sleep
 from tqdm import tqdm
 
 from ml_genn.compilers.event_prop_compiler import default_params
@@ -61,7 +62,7 @@ class Log:
 
         # Write header row
         self.csv_writer.writerow(["Epoch", "Num trials", "Number correct", "Time"])
-    
+
     def start_entry(self):
         self.start_time = perf_counter()
     
@@ -337,6 +338,27 @@ def train_genn(raw_dataset, network, serialiser, unique_suffix,
             with open(f"train_kernel_profile_{unique_suffix}.json", "w") as fp:
                 dump(data, fp)
 
+def record_jetson_power_process(unique_suffix, stop_event):
+    from jtop import jtop
+
+    # Create CSV writer
+    file = open(f"jetson_power_{unique_suffix}.csv", "w")
+    csv_writer = csv.writer(file, delimiter=",")
+
+    # Write header row
+    csv_writer.writerow(["Time", "VDD_CPU_GPU_SOC", "VDD_SOC"])
+
+    with jtop() as jetson:
+        # Loop at safe rate
+        start_time = perf_counter()
+        while jetson.ok():
+            csv_writer.writerow([perf_counter() - start_time,
+                                 jetson.power["rail"]["VDD_CPU_GPU_CV"]["power"] / 1000.0,
+                                 jetson.power["rail"]["VDD_SOC"]["power"] / 1000.0,])
+
+            if stop_event.wait(0):
+                break
+
 def evaluate_genn(raw_dataset, network, unique_suffix,
                   input, hidden, output, sensor_size, ordering, 
                   plot, kernel_profiling, calc_sop,
@@ -372,8 +394,8 @@ def evaluate_genn(raw_dataset, network, unique_suffix,
         metrics, cb_data  = compiled_net.evaluate({input: spikes},
                                                   {output: labels},
                                                   callbacks=callbacks)
-
         end_time = perf_counter()
+
         print(f"GeNN test accuracy: {100 * metrics[output].result}%")
         print(f"GeNN test time = {end_time - start_time}s")
         
@@ -567,6 +589,7 @@ parser.add_argument("--dt", type=float, help="Simulation timestep")
 parser.add_argument("--num-timesteps", type=int, required=True, help="Number of simulation timesteps")
 parser.add_argument("--seed", type=int, default=1234, help="Random number generator seed")
 parser.add_argument("--deterministic", action="store_true", help="Do not randomize selection of test samples")
+parser.add_argument("--record-jetson-power", action="store_true", help="Record Jetson power using JTOP")
 
 args = parser.parse_args()
 
@@ -574,14 +597,23 @@ args = parser.parse_args()
 unique_suffix = "_".join(("_".join(str(i) for i in val) if isinstance(val, list) 
                          else str(val))
                          for arg, val in vars(args).items()
-                         if arg not in ["mode", "kernel_profiling", "calc_sop", "plot",
+                         if arg not in ["mode", "kernel_profiling", "calc_sop", "plot", "record_jetson_power",
                                         "num_test_samples", "test_checkpoint", "deterministic"])
 
 # When training, create parameters file containing arguments in easier-to-handle way
 if args.mode == "train":
     with open(f"params_{unique_suffix}.json", "w") as fp:
         dump(vars(args), fp)
-        
+
+if args.record_jetson_power:
+    jetson_power_stop_event = Event()
+    jetson_power_process = Process(target=record_jetson_power_process,
+                                    args=(unique_suffix, jetson_power_stop_event))
+    jetson_power_process.start()
+
+    # Sleep for 5 seconds to get idle power
+    sleep(5)
+
 # Get SHD data
 if args.mode == "train":
     raw_train_data, sensor_size, ordering, num_classes = load_data(True, args.dataset, args.dt,
@@ -641,6 +673,12 @@ elif args.mode == "test_loihi_nxkernel":
                       sensor_size, num_classes, args.plot, args.dt, args.num_timesteps,
                       num_test_samples)
 
+if args.record_jetson_power:
+    # Sleep for 5 seconds to get idle power
+    sleep(5)
+
+    jetson_power_stop_event.set();
+    jetson_power_process.join()
 if args.plot:
     plt.show()
 
