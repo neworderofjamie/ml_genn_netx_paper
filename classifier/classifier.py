@@ -612,7 +612,7 @@ if args.record_jetson_power:
     jetson_power_process.start()
 
     # Sleep for 5 seconds to get idle power
-    sleep(5)
+    sleep(10)
 
 # Get SHD data
 if args.mode == "train":
@@ -675,7 +675,7 @@ elif args.mode == "test_loihi_nxkernel":
 
 if args.record_jetson_power:
     # Sleep for 5 seconds to get idle power
-    sleep(5)
+    sleep(10)
 
     jetson_power_stop_event.set();
     jetson_power_process.join()
