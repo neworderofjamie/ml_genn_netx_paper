@@ -35,24 +35,22 @@ df = df.drop(columns=["test_accuracy", "test_neuron_update_time",
                       "test_custom_update_zero_out_post_time"])
 
 df["time_per_timestep"] = df["test_gpu_time"] / (num_examples * 1000)
+df["time_per_example"] = df["test_gpu_time"] / num_examples
 df["total_inference_energy"] = df["test_time"] * df["jetson_sim_power"]
 df["total_sim_energy"] = df["test_gpu_time"] * (df["jetson_sim_power"] - df["jetson_idle_power"])
+df["inference_energy_per_example"] = df["total_inference_energy"] / num_examples
 df["sim_energy_per_example"] = df["total_sim_energy"] / num_examples
 df["sim_energy_per_sop"] = df["total_sim_energy"] / num_sop
 
-# Group by bar group params and aggregate across repeats
-agg_df = df.groupby(["num_hidden"], as_index=False, dropna=False)
-agg_df = agg_df.agg(mean_time_per_timestep=NamedAgg(column="time_per_timestep", aggfunc="mean"),
-                    std_time_per_timestep=NamedAgg(column="time_per_timestep", aggfunc="std"),
-                    mean_sim_energy_per_example=NamedAgg(column="sim_energy_per_example", aggfunc="mean"),
-                    std_sim_energy_per_example=NamedAgg(column="sim_energy_per_example", aggfunc="std"),
-                    mean_sim_energy_per_sop=NamedAgg(column="sim_energy_per_sop", aggfunc="mean"),
-                    std_sim_energy_per_sop=NamedAgg(column="sim_energy_per_sop", aggfunc="std"))
-
+df["inference_energy_per_example"] *= 1e3
+df["sim_energy_per_example"] *= 1e3
+df["time_per_example"] *= 1e3
+df["inference_energy_delay_product"] = df["inference_energy_per_example"] * df["time_per_example"]
+print(df)
 def plot_bars(df, axis, bar_x, jetson_column_prefix, scale, y_label):
     # Plot Jetson bars
-    jetson_actor = axis.bar(bar_x, df[f"mean_{jetson_column_prefix}"] * scale,
-                            yerr=df[f"std_{jetson_column_prefix}"] * scale, width=0.4)
+    jetson_actor = axis.bar(bar_x, df[jetson_column_prefix] * scale,
+                            yerr=df[jetson_column_prefix] * scale, width=0.4)
 
     sns.despine(ax=axis)
     axis.xaxis.grid(False)
@@ -63,11 +61,11 @@ def plot_bars(df, axis, bar_x, jetson_column_prefix, scale, y_label):
 
 fig, axes = plt.subplots(3, sharex=True, frameon=False, figsize=(plot_settings.column_width, 3.0))
 
-xticks, xtick_index = np.unique(agg_df["num_hidden"], return_inverse=True)
+xticks, xtick_index = np.unique(df["num_hidden"], return_inverse=True)
 
-jetson_actor = plot_bars(agg_df, axes[0], xtick_index, "time_per_timestep", 1e6, "Time per\ntimestep [us]")
-plot_bars(agg_df, axes[1], xtick_index, "sim_energy_per_example", 1e3, "Energy per\nexample [mJ]")
-plot_bars(agg_df, axes[2], xtick_index, "sim_energy_per_sop", 1e9, "Energy per\nSOP [nJ]")
+jetson_actor = plot_bars(df, axes[0], xtick_index, "time_per_timestep", 1e6, "Time per\ntimestep [us]")
+plot_bars(df, axes[1], xtick_index, "sim_energy_per_example", 1e3, "Energy per\nexample [mJ]")
+plot_bars(df, axes[2], xtick_index, "sim_energy_per_sop", 1e9, "Energy per\nSOP [nJ]")
 
 axes[-1].set_xlabel("Number of hidden neurons")
 axes[-1].set_xticks(np.arange(len(xticks)) + 0.3)
