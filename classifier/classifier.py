@@ -346,7 +346,7 @@ def record_jetson_power_process(unique_suffix, stop_event):
     csv_writer = csv.writer(file, delimiter=",")
 
     # Write header row
-    csv_writer.writerow(["Time", "VDD_CPU_GPU_SOC", "VDD_SOC"])
+    csv_writer.writerow(["Time", "VDD_CPU_GPU_CV", "VDD_SOC"])
 
     with jtop() as jetson:
         # Loop at safe rate
