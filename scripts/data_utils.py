@@ -65,7 +65,7 @@ def load_data_test(data, test_filename, accuracy_key, time_key):
     
 def load_data_frame(keys, params_filter_fn=None, path="results",
                     load_train=False, load_test=False, load_lava=False,
-                    load_train_perf=False, load_test_perf=False):
+                    load_train_perf=False, load_test_perf=False, load_jetson_power=False):
     # Build dictionary to hold data
     data = defaultdict(list)
 
@@ -130,6 +130,38 @@ def load_data_frame(keys, params_filter_fn=None, path="results",
                 # Add performance numbers to data
                 for p in perf_keys:
                     data[f"test_{p}_time"].append(perf[p] if p in perf else None)
+
+            if load_jetson_power:
+                assert load_test
+                jetson_power_filename = os.path.join(path, f"jetson_power_{title[7:]}.csv")
+                if not os.path.exists(jetson_power_filename):
+                    print(f"ERROR: missing '{jetson_power_filename}'")
+                    data["jetson_idle_power"].append(None)
+                    data["jetson_sim_power"].append(None)
+                else:
+                    try:
+                        jetson_power_data = read_csv(jetson_power_filename, delimiter=",")
+                        
+                        # Calculate total power
+                        total_power = jetson_power_data["VDD_CPU_GPU_CV"] + jetson_power_data["VDD_SOC"]
+                        
+                        # Get end time and hence end and start of simulation time
+                        time = jetson_power_data["Time"]
+                        end_time = time.iloc[-1]
+                        sim_end_time = end_time - 10.0
+                        sim_start_time = sim_end_time - data["test_time"][-1]
+                        
+                        # Get mask of idle time and simulation time
+                        idle_mask = ((time >= 1) & (time < 10)) | (time >= (end_time - 9))
+                        sim_mask = (time >= sim_start_time) & (time < sim_end_time)
+                        
+                        # Average idle power and sim power
+                        data["jetson_idle_power"].append(total_power[idle_mask].mean())
+                        data["jetson_sim_power"].append(total_power[sim_mask].mean())
+                    except ParserError as ex:
+                        print(f"ERROR: unable to parse '{jetson_power_filename}: {str(ex)}'")
+                        data["jetson_idle_power"].append(None)
+                        data["jetson_sim_power"].append(None)
 
             # Add parameters to dictionary
             for k in keys:

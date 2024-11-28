@@ -8,29 +8,24 @@ from pandas import NamedAgg
 
 from data_utils import load_data_frame
 
-idle_power = 6.1
-power = {256: 7.4, 512: 7.5, 1024: 7.6}
-dataset_num_examples = {"shd": 2264, "ssc": 20382}
-num_sops = {("shd", 256): 7154159044, ("shd", 512): 18815875280,
-            ("shd", 1024): 53417193820, ("ssc", 256): 65005252387, 
-            ("ssc", 512): 168041369975, ("ssc", 1024): 488839537171}
+num_examples = 2264
+num_sops = {256: 7154159044, 512: 18815875280,
+            1024: 53417193820}
 
 # Load dataframe       
 keys = ["dataset", "num_hidden"]
-df = load_data_frame(keys, lambda p: p["dt"] == 1.0 and p["augmentation"] != "plain" and p["seed"] == 1234,
+df = load_data_frame(keys, lambda p: p["dt"] == 1.0 and p["augmentation"] != "plain" and p["seed"] == 1234 and p["dataset"] == "shd",
                      path=os.path.join("..", "classifier"),
-                     load_test=True, load_test_perf=True)
+                     load_test=True, load_test_perf=True, load_jetson_power=True)
 
 # Sort
 df = df.sort_values(["dataset", "num_hidden"])
 
 # Calculate new columns
 df["test_gpu_time"] = df["test_neuron_update_time"] + df["test_presynaptic_update_time"] + df["test_custom_update_reset_time"]
-num_examples = df["dataset"].map(dataset_num_examples)
-sim_power = df["num_hidden"].map(power)
-num_sop = df.apply(lambda f: num_sops[(f["dataset"], f["num_hidden"])],
-                   axis="columns")
+num_sop = df["num_hidden"].map(num_sops)
 
+print(df["test_gpu_time"] / df["test_time"])
 # Drop some columns we now don't care about
 df = df.drop(columns=["test_accuracy", "test_neuron_update_time", 
                       "test_presynaptic_update_time", "test_custom_update_reset_time",
@@ -40,8 +35,8 @@ df = df.drop(columns=["test_accuracy", "test_neuron_update_time",
                       "test_custom_update_zero_out_post_time"])
 
 df["time_per_timestep"] = df["test_gpu_time"] / (num_examples * 1000)
-df["total_inference_energy"] = df["test_time"] * sim_power
-df["total_sim_energy"] = df["test_gpu_time"] * (sim_power - idle_power)
+df["total_inference_energy"] = df["test_time"] * df["jetson_sim_power"]
+df["total_sim_energy"] = df["test_gpu_time"] * (df["jetson_sim_power"] - df["jetson_idle_power"])
 df["sim_energy_per_example"] = df["total_sim_energy"] / num_examples
 df["sim_energy_per_sop"] = df["total_sim_energy"] / num_sop
 
