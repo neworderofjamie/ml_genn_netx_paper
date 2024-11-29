@@ -176,7 +176,7 @@ class Blend:
         X1_X2 = X1_X2[idx]
         return X1_X2
 
-def load_data(train, dataset, dt, num_timesteps, num=None, deterministic=False):
+def load_data(train, dataset, dt, num_timesteps, num=None, deterministic=False, start_sample_idx=0):
     # Get SHD dataset, cropped to maximum timesteps (in us)
     transform = CropTime(max=num_timesteps * dt * 1000.0)
 
@@ -192,12 +192,14 @@ def load_data(train, dataset, dt, num_timesteps, num=None, deterministic=False):
     # Get raw event data
     raw_data = []
     num_examples = len(dataset)
+    print(f'{num_examples=}')
     if num is None or num > num_examples:
         for i in range(num_examples):
             raw_data.append(dataset[i])
     elif deterministic:
+        print(f'deterministic {start_sample_idx=}, {num=}')
         for i in range(num):
-            raw_data.append(dataset[i])
+            raw_data.append(dataset[i + start_sample_idx])
     else:
         inds = np.random.choice(num_examples, size=num, replace=False)
         for i in inds:
@@ -581,6 +583,7 @@ parser.add_argument("--test-checkpoint", type=int, help="Which epoch's checkpoin
 parser.add_argument("--dataset", choices=["ssc", "shd"], default="shd", required=True)
 parser.add_argument("--augmentation", choices=["shift", "shift-blend", "plain"], default="shift-blend", required=True)
 parser.add_argument("--num-test-samples", type=int, help="Number of testing samples to use")
+parser.add_argument("--start-sample-idx", type=int, default=0, help="Starting index for test samples from dataset")
 parser.add_argument("--num-hidden", type=int, help="Number of hidden neurons")
 parser.add_argument("--reg-lambda", type=float, help="EventProp regularization strength")
 parser.add_argument("--dt", type=float, help="Simulation timestep")
@@ -596,7 +599,7 @@ unique_suffix = "_".join(("_".join(str(i) for i in val) if isinstance(val, list)
                          else str(val))
                          for arg, val in vars(args).items()
                          if arg not in ["mode", "kernel_profiling", "calc_sop", "plot", "record_jetson_power",
-                                        "num_test_samples", "test_checkpoint", "deterministic"])
+                                        "num_test_samples", "test_checkpoint", "deterministic", "start_sample_idx"])
 
 # When training, create parameters file containing arguments in easier-to-handle way
 if args.mode == "train":
@@ -615,12 +618,12 @@ if args.record_jetson_power:
 # Get SHD data
 if args.mode == "train":
     raw_train_data, sensor_size, ordering, num_classes = load_data(True, args.dataset, args.dt,
-                                                                   args.num_timesteps, deterministic=args.deterministic)
+                                                                   args.num_timesteps, deterministic=args.deterministic, start_sample_idx=args.start_sample_idx)
     raw_test_data, _, _, _ = load_data(False, args.dataset, args.dt,
-                                       args.num_timesteps, args.num_test_samples, deterministic=args.deterministic)
+                                       args.num_timesteps, args.num_test_samples, deterministic=args.deterministic, start_sample_idx=args.start_sample_idx)
 else:
     raw_test_data, sensor_size, ordering, num_classes = load_data(False, args.dataset, args.dt,
-                                                                  args.num_timesteps, args.num_test_samples, deterministic=args.deterministic)
+                                                                  args.num_timesteps, args.num_test_samples, deterministic=args.deterministic, start_sample_idx=args.start_sample_idx)
 
 # Build suitable mlGeNN model
 network, input, hidden, output, input_hidden = build_ml_genn_model(sensor_size, num_classes, args.num_hidden)
@@ -650,7 +653,7 @@ else:
         test_checkpoint = args.num_epochs - 1
 
 network.load((test_checkpoint,), serialiser)
-
+print(f'{unique_suffix=}')
 export(f"{unique_suffix}.net", input, output, dt=args.dt)
 
 
