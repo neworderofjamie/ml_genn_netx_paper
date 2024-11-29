@@ -201,8 +201,6 @@ def load_data(train, dataset, dt, num_timesteps, num=None, deterministic=False):
         inds = np.random.choice(num_examples, size=num, replace=False)
         for i in inds:
             raw_data.append(dataset[i])
-            
-
 
     return raw_data, dataset.sensor_size, dataset.ordering, len(dataset.classes)
 
