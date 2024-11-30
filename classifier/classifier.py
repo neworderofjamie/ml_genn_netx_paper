@@ -554,8 +554,9 @@ def evaluate_lava(raw_dataset, net_x_filename, unique_suffix,
 
         # Find maximum output neuron voltage and compare to label
         pred = np.argmax(sum_v, axis=1)
-        num_correct += np.sum(pred == labels)
-
+        num_slice_correct = np.sum(pred == labels)
+        num_correct += num_slice_correct
+        log.end_entry(test_checkpoint, len(raw_dataset_slice), num_slice_correct)
         if plot:
             hidden_spikes = monitor_hidden.get_data()["neuron"]["s_out"]
             hidden_spikes = np.reshape(hidden_spikes, (len(raw_dataset_slice), num_timesteps, num_hidden))
@@ -570,7 +571,7 @@ def evaluate_lava(raw_dataset, net_x_filename, unique_suffix,
             axes[1,0].set_ylabel("Output voltage")
         network_lava.stop()
 
-    log.end_entry(test_checkpoint, num_test_samples, num_correct)
+
     print(f"Lava test accuracy: {num_correct / num_test_samples*100}%")
 
 parser = ArgumentParser()
