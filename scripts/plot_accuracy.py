@@ -16,6 +16,8 @@ def plot_accuracy_axis(df, axis, bar_group_params):
                             std_test_accuracy=NamedAgg(column="test_accuracy", aggfunc="std"),
                             mean_test_lava_accuracy=NamedAgg(column="test_lava_accuracy", aggfunc="mean"),
                             std_test_lava_accuracy=NamedAgg(column="test_lava_accuracy", aggfunc="std"),
+                            mean_test_loihi_accuracy=NamedAgg(column="test_loihi_accuracy", aggfunc="mean"),
+                            std_test_loihi_accuracy=NamedAgg(column="test_loihi_accuracy", aggfunc="std"),
                             mean_train_accuracy=NamedAgg(column="train_accuracy", aggfunc="mean"),
                             std_train_accuracy=NamedAgg(column="train_accuracy", aggfunc="std"))
 
@@ -28,6 +30,8 @@ def plot_accuracy_axis(df, axis, bar_group_params):
                                yerr=group_df["std_test_accuracy"], width=0.2)
     lava_test_actor = axis.bar(xtick_index + 0.4, group_df["mean_test_lava_accuracy"],
                                yerr=group_df["std_test_lava_accuracy"], width=0.2)
+    loihi_test_actor = axis.bar(xtick_index + 0.6, group_df["mean_test_loihi_accuracy"],
+                                yerr=group_df["std_test_loihi_accuracy"], width=0.2)
   
 
     sns.despine(ax=axis)
@@ -37,7 +41,10 @@ def plot_accuracy_axis(df, axis, bar_group_params):
     
     axis.set_xticklabels(xticks)
 
-    return [train_actor, genn_test_actor, lava_test_actor]
+    return [train_actor, genn_test_actor, lava_test_actor, loihi_test_actor]
+
+loihi_data = {("shd", 256): 83.74558304, ("shd", 512): 89.48763251,
+              ("shd", 1024): 85.37985866, ("ssc", 256): 58.91472868}
 
 axis_group_params = ["dataset"]
 bar_group_params = ["num_hidden"]
@@ -46,7 +53,8 @@ keys = bar_group_params + axis_group_params
 df = load_data_frame(keys, lambda p: p["dt"] == 1.0 and p["augmentation"] != "plain",
                      path=os.path.join("..", "classifier"),
                      load_train=True, load_test=True, load_lava=True)
-    
+df["test_loihi_accuracy"] = df.apply(lambda r: loihi_data.get((r["dataset"], r["num_hidden"])), axis="columns")   
+   
 axes_df = df.groupby(axis_group_params, as_index=False, dropna=False)
 fig, axes = plt.subplots(1, len(axes_df), sharey=True, figsize=(column_width, 1.75))
 for (name, ax_df), ax in zip(axes_df, axes):
