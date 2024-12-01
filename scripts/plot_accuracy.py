@@ -44,7 +44,8 @@ def plot_accuracy_axis(df, axis, bar_group_params):
     return [train_actor, genn_test_actor, lava_test_actor, loihi_test_actor]
 
 loihi_data = {("shd", 256): 83.74558304, ("shd", 512): 89.48763251,
-              ("shd", 1024): 85.37985866, ("ssc", 256): 58.91472868}
+              ("shd", 1024): 85.37985866, ("ssc", 256): 58.91472868,
+              ("ssc", 512): 61.74075164, ("ssc", 1024): 62.49632028}
 
 axis_group_params = ["dataset"]
 bar_group_params = ["num_hidden"]
