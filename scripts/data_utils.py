@@ -54,9 +54,8 @@ def load_data_test(data, test_filename, accuracy_key, time_key):
     else:
         try:
             test_data = read_csv(test_filename, delimiter=",")
-            assert len(test_data) == 1
-            last_epoch_test_data = test_data.iloc[0]
-            data[accuracy_key].append((100.0 * (last_epoch_test_data["Number correct"] / last_epoch_test_data["Num trials"])))
+            assert (test_data["Epoch"] == test_data["Epoch"].iloc[0]).all
+            data[accuracy_key].append((100.0 * (test_data["Number correct"].sum() / test_data["Num trials"].sum())))
             data[time_key].append(test_data["Time"].sum())
         except ParserError as ex:
             print(f"ERROR: unable to parse '{test_filename}: {str(ex)}'")
