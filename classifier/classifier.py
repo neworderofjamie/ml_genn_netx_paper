@@ -630,7 +630,7 @@ else:
                                                                   args.num_timesteps, args.num_test_samples, deterministic=args.deterministic, start_sample_idx=args.start_sample_idx)
 
 # Build suitable mlGeNN model
-model_batch_size = args.inference_batch_size if args.mode == "test_genn" else TRAIN_BATCH_SIZE
+model_batch_size = TRAIN_BATCH_SIZE if args.mode == "train" else args.inference_batch_size
 network, input, hidden, output, input_hidden = build_ml_genn_model(sensor_size, num_classes,
                                                                    args.num_hidden, model_batch_size)
 
