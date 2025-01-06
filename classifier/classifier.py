@@ -28,7 +28,7 @@ from tqdm import tqdm
 
 from ml_genn.compilers.event_prop_compiler import default_params
 
-BATCH_SIZE = int(os.environ['BATCH_SIZE']) if 'BATCH_SIZE' in os.environ else 32
+TRAIN_BATCH_SIZE = 32
 EMA_ALPHA1 = 0.8
 EMA_ALPHA2 = 0.85
 ETA_FAC = 0.5
@@ -207,11 +207,11 @@ def load_data(train, dataset, dt, num_timesteps, num=None, deterministic=False, 
 
     return raw_data, dataset.sensor_size, dataset.ordering, len(dataset.classes)
 
-def build_ml_genn_model(sensor_size, num_classes, num_hidden):
+def build_ml_genn_model(sensor_size, num_classes, num_hidden, batch_size):
     network = Network(default_params)
     with network:
         # Populations
-        input = Population(SpikeInput(max_spikes=BATCH_SIZE * 15000),
+        input = Population(SpikeInput(max_spikes=batch_size * 15000 * 2),
                            int(np.prod(sensor_size)), 
                            name="Input")
         hidden = Population(LeakyIntegrateFire(v_thresh=1.0, tau_mem=20.0,
@@ -240,7 +240,7 @@ def train_genn(raw_dataset, network, serialiser, unique_suffix,
                                  losses="sparse_categorical_crossentropy", rng_seed=args.seed,
                                  reg_lambda_upper=reg_lambda, reg_lambda_lower=reg_lambda, 
                                  reg_nu_upper=14, max_spikes=1500, 
-                                 optimiser=Adam(BASELINE_LR / 1000.0), batch_size=BATCH_SIZE,
+                                 optimiser=Adam(BASELINE_LR / 1000.0), batch_size=TRAIN_BATCH_SIZE,
                                  kernel_profiling=kernel_profiling)
     # Create augmentation objects
     shift = Shift(40.0, sensor_size)
@@ -361,8 +361,8 @@ def record_jetson_power_process(unique_suffix, stop_event):
 
 def evaluate_genn(raw_dataset, network, unique_suffix,
                   input, hidden, output, sensor_size, ordering, 
-                  plot, kernel_profiling, calc_sop,
-                  dt, num_timesteps, num_test_samples, test_checkpoint):
+                  plot, kernel_profiling, calc_sop, dt, num_timesteps,
+                  num_test_samples, batch_size, test_checkpoint):
     # Preprocess
     spikes = []
     labels = []
@@ -376,7 +376,7 @@ def evaluate_genn(raw_dataset, network, unique_suffix,
 
     compiler = InferenceCompiler(evaluate_timesteps=num_timesteps,
                                  reset_in_syn_between_batches=True,
-                                 batch_size=BATCH_SIZE, kernel_profiling=kernel_profiling)
+                                 batch_size=batch_size, kernel_profiling=kernel_profiling)
     compiled_net = compiler.compile(network, name=f"classifier_test_{unique_suffix}")
 
     with compiled_net:
@@ -592,6 +592,7 @@ parser.add_argument("--num-timesteps", type=int, required=True, help="Number of 
 parser.add_argument("--seed", type=int, default=1234, help="Random number generator seed")
 parser.add_argument("--deterministic", action="store_true", help="Do not randomize selection of test samples")
 parser.add_argument("--record-jetson-power", action="store_true", help="Record Jetson power using JTOP")
+parser.add_argument("--inference-batch-size", type=int, default=1, help="Batch size to use for mlGeNN inference")
 
 args = parser.parse_args()
 
@@ -599,18 +600,20 @@ args = parser.parse_args()
 unique_suffix = "_".join(("_".join(str(i) for i in val) if isinstance(val, list) 
                          else str(val))
                          for arg, val in vars(args).items()
-                         if arg not in ["mode", "kernel_profiling", "calc_sop", "plot", "record_jetson_power",
-                                        "num_test_samples", "test_checkpoint", "deterministic", "start_sample_idx"])
+                         if arg not in ["mode", "kernel_profiling", "calc_sop", "plot",
+                                        "record_jetson_power", "num_test_samples", "test_checkpoint",
+                                        "deterministic", "start_sample_idx","inference_batch_size"])
 
 # When training, create parameters file containing arguments in easier-to-handle way
 if args.mode == "train":
     with open(f"params_{unique_suffix}.json", "w") as fp:
         dump(vars(args), fp)
 
+test_unique_suffix = f"{unique_suffix}_{args.inference_batch_size}"
 if args.record_jetson_power:
     jetson_power_stop_event = Event()
     jetson_power_process = Process(target=record_jetson_power_process,
-                                    args=(unique_suffix, jetson_power_stop_event))
+                                    args=(test_unique_suffix, jetson_power_stop_event))
     jetson_power_process.start()
 
     # Sleep for 5 seconds to get idle power
@@ -627,7 +630,9 @@ else:
                                                                   args.num_timesteps, args.num_test_samples, deterministic=args.deterministic, start_sample_idx=args.start_sample_idx)
 
 # Build suitable mlGeNN model
-network, input, hidden, output, input_hidden = build_ml_genn_model(sensor_size, num_classes, args.num_hidden)
+model_batch_size = TRAIN_BATCH_SIZE if args.mode == "train" else args.inference_batch_size
+network, input, hidden, output, input_hidden = build_ml_genn_model(sensor_size, num_classes,
+                                                                   args.num_hidden, model_batch_size)
 
 serialiser = Numpy(f"checkpoints_{unique_suffix}")
 
@@ -661,10 +666,11 @@ export(f"{unique_suffix}.net", input, output, dt=args.dt)
 num_test_samples = (len(raw_test_data) if args.num_test_samples is None
                     else args.num_test_samples)
 if args.mode == "test_genn":
-    evaluate_genn(raw_test_data, network, unique_suffix,
+    evaluate_genn(raw_test_data, network, test_unique_suffix,
                   input, hidden, output, sensor_size, ordering, 
                   args.plot, args.kernel_profiling, args.calc_sop,
-                  args.dt, args.num_timesteps, num_test_samples, test_checkpoint)
+                  args.dt, args.num_timesteps, num_test_samples, 
+                  args.inference_batch_size, test_checkpoint)
 elif args.mode == "test_lava" or args.mode == "test_loihi":
     evaluate_lava(raw_test_data, f"{unique_suffix}.net", unique_suffix,
                   sensor_size, num_classes, args.mode, 
