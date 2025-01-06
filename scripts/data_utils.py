@@ -64,7 +64,8 @@ def load_data_test(data, test_filename, accuracy_key, time_key):
     
 def load_data_frame(keys, params_filter_fn=None, path="results",
                     load_train=False, load_test=False, load_lava=False,
-                    load_train_perf=False, load_test_perf=False, load_jetson_power=False):
+                    load_train_perf=False, load_test_perf=False, load_jetson_power=False,
+                    inference_batch_size=None):
     # Build dictionary to hold data
     data = defaultdict(list)
 
@@ -106,7 +107,9 @@ def load_data_frame(keys, params_filter_fn=None, path="results",
                         data["train_time"].append(None)
             
             if load_test:
-                load_data_test(data, os.path.join(path, f"test_output_{title[7:]}.csv"),
+                filename = (f"test_output_{title[7:]}.csv" if inference_batch_size is None
+                            else f"test_output_{title[7:]}_{inference_batch_size}.csv")
+                load_data_test(data, os.path.join(path, filename),
                                "test_accuracy", "test_time")
             if load_lava:
                 load_data_test(data, os.path.join(path, f"test_lava_output_{title[7:]}.csv"),
@@ -122,8 +125,10 @@ def load_data_frame(keys, params_filter_fn=None, path="results",
                     data[f"train_{p}_time"].append(perf[p] if p in perf else None)
 
             if load_test_perf:
+                filename = (f"test_kernel_profile_{title[7:]}.json" if inference_batch_size is None
+                            else f"test_kernel_profile_{title[7:]}_{inference_batch_size}.json")
                 # Load performance log
-                with open(os.path.join(path, f"test_kernel_profile_{title[7:]}.json")) as fp:
+                with open(os.path.join(path, filename)) as fp:
                     perf = load(fp)
                 
                 # Add performance numbers to data
@@ -132,7 +137,9 @@ def load_data_frame(keys, params_filter_fn=None, path="results",
 
             if load_jetson_power:
                 assert load_test
-                jetson_power_filename = os.path.join(path, f"jetson_power_{title[7:]}.csv")
+                filename = (f"jetson_power_{title[7:]}.csv" if inference_batch_size is None
+                            else f"jetson_power_{title[7:]}_{inference_batch_size}.csv")
+                jetson_power_filename = os.path.join(path, filename)
                 if not os.path.exists(jetson_power_filename):
                     print(f"ERROR: missing '{jetson_power_filename}'")
                     data["jetson_idle_power"].append(None)
